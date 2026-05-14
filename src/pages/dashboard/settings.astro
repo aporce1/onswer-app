@@ -1,0 +1,194 @@
+---
+/**
+ * /dashboard/settings — account preferences.
+ *
+ * Editable: display name, locale.
+ * Read-only: email (changing requires a re-verify flow), plan (admin
+ * only for now, link to pricing page).
+ *
+ * Form-handled SSR: POST submits to itself, the page calls /v1/me with
+ * PATCH and re-renders with the result.
+ *
+ * Sign out lives at the bottom as its own little form so it can't get
+ * accidentally clicked through Enter on the main form.
+ */
+import DashboardLayout from '~/layouts/DashboardLayout.astro';
+import { requireSession } from '~/lib/auth';
+import { api } from '~/lib/api';
+import { interpretPlan } from '~/lib/interpret';
+
+const sessionOrResponse = await requireSession(Astro);
+if (sessionOrResponse instanceof Response) return sessionOrResponse;
+let user = sessionOrResponse;
+
+let flash: { tone: 'ok' | 'error', message: string } | null = null;
+
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData();
+  const action = String(formData.get('action') ?? '');
+
+  if (action === 'signout') {
+    // Hit logout to invalidate server-side counters + clear the cookie
+    await api('/v1/auth/logout', {
+      method: 'POST',
+      cookie: Astro.request.headers.get('cookie') ?? '',
+    });
+    // Clear the cookie locally too (defence in depth) and redirect.
+    Astro.cookies.delete('onswer_session', {
+      path: '/',
+      domain: (() => {
+        const siteUrl = import.meta.env.PUBLIC_SITE_URL || 'https://app.onswer.app';
+        const host    = new URL(siteUrl).hostname;
+        const labels  = host.split('.');
+        return host === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(host)
+          ? undefined
+          : '.' + labels.slice(1).join('.');
+      })(),
+    });
+    return Astro.redirect('/login', 302);
+  }
+
+  if (action === 'profile') {
+    const name   = String(formData.get('name')   ?? '').trim();
+    const locale = String(formData.get('locale') ?? user.locale).trim();
+    const res = await api<typeof user>('/v1/me', {
+      method: 'PATCH',
+      body:   { name, locale },
+      cookie: Astro.request.headers.get('cookie') ?? '',
+    });
+    if (res.ok) {
+      user = res.data;
+      flash = { tone: 'ok', message: 'Profile updated.' };
+    } else {
+      flash = { tone: 'error', message: 'error' in res ? res.error : 'Could not save changes.' };
+    }
+  }
+}
+
+const planInterp = interpretPlan(user.plan);
+---
+<DashboardLayout title="Settings" user={user} active="settings" width="centered">
+
+  {flash && (
+    <div class="rounded-xl px-4 py-3 mb-5 text-sm"
+         style={flash.tone === 'ok'
+           ? 'background: var(--color-ok-soft); color: var(--color-ok);'
+           : 'background: var(--color-bad-soft); color: var(--color-bad);'}>
+      {flash.message}
+    </div>
+  )}
+
+  <!-- ============================================================ -->
+  <!-- Profile                                                       -->
+  <!-- ============================================================ -->
+  <form method="POST" class="card p-6 mb-5">
+    <input type="hidden" name="action" value="profile" />
+
+    <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Profile</h3>
+    <p class="text-xs mt-0.5 mb-5" style="color: var(--color-ink-muted);">
+      How we show your name across the dashboard and any emails we send.
+    </p>
+
+    <div class="space-y-4">
+      <div>
+        <label for="name" class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">
+          Display name
+        </label>
+        <input id="name" name="name" type="text" required class="input"
+               value={user.name ?? ''} />
+      </div>
+
+      <div>
+        <label for="email" class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">
+          Email
+        </label>
+        <input id="email" type="email" disabled class="input"
+               style="opacity: 0.6; cursor: not-allowed;"
+               value={user.email} />
+        <p class="mt-1.5 text-xs" style="color: var(--color-ink-subtle);">
+          Email changes coming soon — meanwhile, contact us at
+          <a href="mailto:hi@onswer.app" class="underline" style="color: var(--color-brand-hover);">hi@onswer.app</a>.
+        </p>
+      </div>
+
+      <div>
+        <label for="locale" class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">
+          Language
+        </label>
+        <select id="locale" name="locale" class="input">
+          <option value="en" selected={user.locale === 'en'}>English</option>
+          <option value="pt" selected={user.locale === 'pt'}>Português (Brasil)</option>
+        </select>
+        <p class="mt-1.5 text-xs" style="color: var(--color-ink-subtle);">
+          Used for audit query generation, recommendations, and emails.
+        </p>
+      </div>
+    </div>
+
+    <div class="mt-6">
+      <button type="submit" class="btn-primary">Save changes</button>
+    </div>
+  </form>
+
+  <!-- ============================================================ -->
+  <!-- Plan                                                          -->
+  <!-- ============================================================ -->
+  <div class="card p-6 mb-5">
+    <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Plan</h3>
+    <p class="text-xs mt-0.5 mb-4" style="color: var(--color-ink-muted);">
+      {planInterp.headline}
+    </p>
+
+    <div class="flex items-center justify-between gap-4 flex-wrap">
+      <div class="flex items-center gap-3">
+        <span class="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold px-2.5 py-1 rounded-full"
+              style={user.plan === 'free'
+                ? 'background: var(--color-surface-muted); color: var(--color-ink-muted);'
+                : 'background: var(--color-ok-soft); color: var(--color-ok);'}>
+          {user.plan.charAt(0).toUpperCase() + user.plan.slice(1)} plan
+        </span>
+        {user.plan_expires_at && (
+          <span class="text-xs" style="color: var(--color-ink-subtle);">
+            Renews / expires {new Date(user.plan_expires_at.replace(' ', 'T') + 'Z').toLocaleDateString()}
+          </span>
+        )}
+      </div>
+
+      {user.plan === 'free' ? (
+        <a href="https://onswer.app/#pricing" target="_blank" rel="noreferrer"
+           class="btn-primary">
+          See plans
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14M13 5l7 7-7 7"/>
+          </svg>
+        </a>
+      ) : (
+        <p class="text-xs" style="color: var(--color-ink-subtle);">
+          Need to change your plan? Email
+          <a href="mailto:hi@onswer.app" class="underline ml-1" style="color: var(--color-brand-hover);">hi@onswer.app</a>.
+        </p>
+      )}
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- Account                                                       -->
+  <!-- ============================================================ -->
+  <div class="card p-6">
+    <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Account</h3>
+    <p class="text-xs mt-0.5 mb-4" style="color: var(--color-ink-muted);">
+      Sign out of this device. Your data stays in your account.
+    </p>
+
+    <form method="POST" class="inline">
+      <input type="hidden" name="action" value="signout" />
+      <button type="submit" class="btn-secondary">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+        </svg>
+        Sign out
+      </button>
+    </form>
+  </div>
+
+</DashboardLayout>

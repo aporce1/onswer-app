@@ -71,9 +71,29 @@ export interface AuditDetail {
   top_cited_domains: AuditCitation[];
   recommendations: AuditRecommendation[];
   suggested_competitors: Array<{ name: string; domain?: string }>;
+  ai_interpretation: string | null;
+  ai_interpretation_generated_at: string | null;
 }
 
 export async function getAudit(context: APIContext, id: number) {
   const cookie = context.request.headers.get('cookie') ?? '';
   return api<AuditDetail>(`/v1/audits/${id}`, { cookie });
+}
+
+export async function requestAiInterpretation(
+  context: APIContext,
+  id: number,
+  refresh = false
+) {
+  const cookie = context.request.headers.get('cookie') ?? '';
+  return api<{
+    text: string;
+    generated_at: string | null;
+    fresh: boolean;
+    cost_usd?: number;
+    tokens_used?: number;
+  }>(`/v1/audits/${id}/ai-interpretation${refresh ? '?refresh=1' : ''}`, {
+    method: 'POST',
+    cookie,
+  });
 }

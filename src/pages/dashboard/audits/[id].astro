@@ -18,7 +18,7 @@
  */
 import DashboardLayout from '~/layouts/DashboardLayout.astro';
 import { requireSession } from '~/lib/auth';
-import { getAudit, type AuditAnswer } from '~/lib/audits';
+import { getAudit, requestAiInterpretation, type AuditAnswer } from '~/lib/audits';
 import { interpretScore } from '~/lib/interpret';
 
 const sessionOrResponse = await requireSession(Astro);
@@ -28,9 +28,28 @@ const user = sessionOrResponse;
 const id = Number(Astro.params.id);
 if (!Number.isFinite(id) || id <= 0) return Astro.redirect('/dashboard/brands', 302);
 
+// Handle POST actions (request/refresh AI interpretation) BEFORE rendering
+// so the page below gets the fresh state on submit.
+let aiFlash: { tone: 'ok' | 'error', message: string } | null = null;
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? '');
+  if (action === 'ai-interpret') {
+    const refresh = form.get('refresh') === '1';
+    const aiRes = await requestAiInterpretation(Astro, id, refresh);
+    if (!aiRes.ok) {
+      aiFlash = {
+        tone: 'error',
+        message: 'error' in aiRes ? aiRes.error : 'AI analysis failed. Try again in a moment.',
+      };
+    }
+  }
+}
+
 const res = await getAudit(Astro, id);
 if (!res.ok) return Astro.redirect('/dashboard/brands', 302);
 const audit = res.data;
+const canUseAi = ['pro', 'agency'].includes(user.plan);
 
 const scoreInterp = interpretScore(audit.visibility_score);
 const toneColor =
@@ -158,6 +177,93 @@ function parseCompetitors(raw: string | null): string[] {
         <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Completed</p>
         <p class="mt-1 text-xs font-mono" style="color: var(--color-ink);">{fmtDate(audit.completed_at)}</p>
       </div>
+    </div>
+  </div>
+
+  <!-- AI INTERPRETATION (Pro+) =========================================== -->
+  <div class="card overflow-hidden mb-6"
+       style={audit.ai_interpretation
+         ? 'background: linear-gradient(180deg, var(--color-brand-soft) 0%, var(--color-surface) 30%); border: 1px solid var(--color-brand-line);'
+         : ''}>
+
+    <div class="p-6">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div class="flex items-start gap-3">
+          <div class="w-8 h-8 rounded-lg shrink-0 inline-flex items-center justify-center"
+               style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 50%, #06B6D4 100%); color: white;">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2L9 9l-7 1 5 5-1 7 6-3 6 3-1-7 5-5-7-1z"/>
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold" style="color: var(--color-ink);">AI executive analysis</h3>
+            <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
+              {audit.ai_interpretation
+                ? `Claude analysed this audit and wrote a three-paragraph brief. Refresh to get a different angle.`
+                : `Have Claude read this audit and write a brief: what's the headline, why, and what to do this week.`}
+            </p>
+          </div>
+        </div>
+
+        {canUseAi && audit.status === 'completed' && (
+          <form method="POST">
+            <input type="hidden" name="action" value="ai-interpret" />
+            {audit.ai_interpretation && <input type="hidden" name="refresh" value="1" />}
+            <button type="submit" class="btn-primary">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                {audit.ai_interpretation ? (
+                  <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                ) : (
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9z"/>
+                )}
+              </svg>
+              {audit.ai_interpretation ? 'Regenerate analysis' : 'Get AI analysis'}
+            </button>
+          </form>
+        )}
+
+        {!canUseAi && (
+          <a href="https://onswer.app/#pricing" target="_blank" rel="noreferrer"
+             class="btn-primary">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9z"/>
+            </svg>
+            Unlock with Pro
+          </a>
+        )}
+      </div>
+
+      {aiFlash && (
+        <div class="mt-4 rounded-lg px-3 py-2 text-xs"
+             style={aiFlash.tone === 'ok'
+               ? 'background: var(--color-ok-soft); color: var(--color-ok);'
+               : 'background: var(--color-bad-soft); color: var(--color-bad);'}>
+          {aiFlash.message}
+        </div>
+      )}
+
+      {audit.ai_interpretation && (
+        <div class="mt-5 pt-5 border-t" style="border-color: var(--color-brand-line);">
+          {audit.ai_interpretation.split(/\n\n+/).map(para => (
+            <p class="text-sm leading-relaxed mb-3 last:mb-0" style="color: var(--color-ink);">
+              {para.trim()}
+            </p>
+          ))}
+          {audit.ai_interpretation_generated_at && (
+            <p class="mt-4 text-[11px]" style="color: var(--color-ink-subtle);">
+              Generated {new Date(audit.ai_interpretation_generated_at.replace(' ', 'T') + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} by Claude
+            </p>
+          )}
+        </div>
+      )}
+
+      {!audit.ai_interpretation && !canUseAi && (
+        <p class="mt-4 text-xs leading-relaxed" style="color: var(--color-ink-muted);">
+          The rules-based interpretation above gives you the basics. The AI version adds
+          executive narrative, specific weekly actions, and reads patterns across all your
+          answers — handy when reporting to your team or your CEO.
+        </p>
+      )}
     </div>
   </div>
 

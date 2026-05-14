@@ -20,7 +20,10 @@ export default defineConfig({
   output: 'server',
   adapter: vercel({
     webAnalytics: { enabled: false },
-    maxDuration: 30,
+    // 60s ceiling — the AI-interpretation POST handler waits on the API
+    // which in turn waits on OpenRouter. Most calls finish in 5-15s but
+    // we leave headroom so a slow OpenRouter day doesn't bubble up as 502.
+    maxDuration: 60,
   }),
   trailingSlash: 'never',
   prefetch: { defaultStrategy: 'viewport' },

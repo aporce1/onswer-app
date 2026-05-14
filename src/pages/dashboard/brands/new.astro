@@ -1,0 +1,170 @@
+---
+/**
+ * /dashboard/brands/new — add a brand.
+ *
+ * Form-handled SSR: POST submits to itself, page calls API server-side,
+ * redirects to /dashboard/brands/{id} on success or re-renders with errors.
+ *
+ * Free users see a "your free plan creates the brand but won't monitor it"
+ * notice instead of the cadence picker. They still get value out of seeing
+ * their score history, and the upsell is one click away.
+ */
+import DashboardLayout from '~/layouts/DashboardLayout.astro';
+import { requireSession } from '~/lib/auth';
+import { createBrand, frequencyLabels, type ScanFrequency } from '~/lib/brands';
+
+const sessionOrResponse = await requireSession(Astro);
+if (sessionOrResponse instanceof Response) return sessionOrResponse;
+const user = sessionOrResponse;
+const isFree = user.plan === 'free';
+
+let domain = '';
+let cadence: ScanFrequency = isFree ? 'paused' : 'daily';
+let errorMsg: string | null = null;
+
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData();
+  domain  = String(formData.get('domain') ?? '').trim();
+  const cadenceIn = String(formData.get('scan_frequency') ?? cadence);
+  if (['paused','weekly','three_per_week','daily','twice_daily'].includes(cadenceIn)) {
+    cadence = cadenceIn as ScanFrequency;
+  }
+
+  if (domain === '') {
+    errorMsg = 'Please enter a domain.';
+  } else {
+    const res = await createBrand(Astro, {
+      domain,
+      scan_frequency: cadence,
+    });
+    if (res.ok) {
+      return Astro.redirect(`/dashboard/brands/${res.data.brand.id}?welcome=1`, 302);
+    }
+    errorMsg = 'error' in res ? res.error : 'Could not create brand. Try again.';
+  }
+}
+
+// Per-plan cadence options. Free = only paused. Solo = up to weekly.
+const cadenceOptions: { value: ScanFrequency; label: string; tier: string }[] = [
+  { value: 'paused',         label: frequencyLabels.paused,         tier: 'free' },
+  { value: 'weekly',         label: frequencyLabels.weekly,         tier: 'solo' },
+  { value: 'three_per_week', label: frequencyLabels.three_per_week, tier: 'pro'  },
+  { value: 'daily',          label: frequencyLabels.daily,          tier: 'pro'  },
+];
+const planRank: Record<string, number> = { free: 0, solo: 1, pro: 2, agency: 2 };
+const userRank = planRank[user.plan] ?? 0;
+---
+<DashboardLayout title="Add brand" user={user} active="brands">
+
+  <Fragment slot="header-actions">
+    <a href="/dashboard/brands" class="btn-secondary">Cancel</a>
+  </Fragment>
+
+  <form method="POST" class="card p-7 max-w-2xl">
+
+    {errorMsg && (
+      <div class="rounded-lg p-3 mb-5 text-sm"
+           style="background: var(--color-bad-soft); color: var(--color-bad);">
+        {errorMsg}
+      </div>
+    )}
+
+    <!-- Domain ----------------------------------------------------------- -->
+    <div>
+      <label for="domain" class="block text-sm font-medium mb-1.5" style="color: var(--color-ink);">
+        Domain to monitor
+      </label>
+      <input id="domain" name="domain" type="text" required autofocus
+             value={domain}
+             placeholder="example.com"
+             class="input" />
+      <p class="mt-1.5 text-xs" style="color: var(--color-ink-muted);">
+        Just the domain — we'll strip protocol and www. We'll auto-detect your
+        category, competitors, and the queries buyers actually ask about you.
+      </p>
+    </div>
+
+    <!-- Cadence ---------------------------------------------------------- -->
+    <div class="mt-7">
+      <label class="block text-sm font-medium mb-1.5" style="color: var(--color-ink);">
+        Scan cadence
+      </label>
+      <p class="text-xs mb-3" style="color: var(--color-ink-muted);">
+        How often we re-scan to track changes. You can change this anytime.
+      </p>
+
+      <div class="space-y-2">
+        {cadenceOptions.map(opt => {
+          const optRank = planRank[opt.tier];
+          const locked = optRank > userRank;
+          const selected = cadence === opt.value;
+          return (
+            <label class={`flex items-center gap-3 px-4 py-3 rounded-lg cursor-pointer transition-colors ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                   style={selected
+                     ? 'border: 1.5px solid var(--color-brand); background: var(--color-brand-soft);'
+                     : 'border: 1px solid var(--color-border); background: var(--color-surface);'}>
+              <input type="radio" name="scan_frequency" value={opt.value}
+                     checked={selected}
+                     disabled={locked}
+                     class="w-4 h-4 shrink-0"
+                     style="accent-color: var(--color-brand);" />
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-medium" style="color: var(--color-ink);">{opt.label}</p>
+                {opt.value === 'paused' && (
+                  <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
+                    No automatic scans. Useful while you set things up.
+                  </p>
+                )}
+                {opt.value === 'weekly' && (
+                  <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
+                    Re-scan every 7 days — good for slow-moving categories.
+                  </p>
+                )}
+                {opt.value === 'three_per_week' && (
+                  <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
+                    Re-scan every ~2 days — balance speed and cost.
+                  </p>
+                )}
+                {opt.value === 'daily' && (
+                  <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
+                    Re-scan every 24 hours — catch shifts the moment they happen.
+                  </p>
+                )}
+              </div>
+              {locked && (
+                <span class="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full"
+                      style="background: var(--color-surface-muted); color: var(--color-ink-muted);">
+                  {opt.tier === 'solo' ? 'Solo+' : 'Pro+'}
+                </span>
+              )}
+            </label>
+          );
+        })}
+      </div>
+
+      {isFree && (
+        <p class="mt-4 text-xs leading-relaxed" style="color: var(--color-ink-muted);">
+          On the free plan we'll save your brand so you can review past audits, but we
+          won't scan it automatically. <a href="https://onswer.app/#pricing" target="_blank" rel="noreferrer"
+            class="font-semibold underline" style="color: var(--color-brand-hover);">See plans</a>
+          to unlock continuous monitoring.
+        </p>
+      )}
+    </div>
+
+    <!-- Submit ---------------------------------------------------------- -->
+    <div class="mt-8 flex items-center justify-between">
+      <p class="text-xs" style="color: var(--color-ink-subtle);">
+        {!isFree && cadence !== 'paused' && (
+          <>The first scan starts immediately — your first result lands in ~90 seconds.</>
+        )}
+      </p>
+      <button type="submit" class="btn-primary">
+        Create brand
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14M13 5l7 7-7 7"/>
+        </svg>
+      </button>
+    </div>
+  </form>
+</DashboardLayout>

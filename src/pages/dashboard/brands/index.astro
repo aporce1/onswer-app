@@ -1,0 +1,151 @@
+---
+/**
+ * /dashboard/brands — list of the user's brands.
+ *
+ * Each row shows the brand, its latest visibility score, scan cadence,
+ * and one-line interpretation below the score so the user instantly
+ * knows what to do (Radar's lesson: never show a number naked).
+ *
+ * Free users see their brand but can't enable a cadence — the dropdown
+ * is disabled with an inline "Upgrade to enable" link.
+ */
+import DashboardLayout from '~/layouts/DashboardLayout.astro';
+import { requireSession } from '~/lib/auth';
+import { listBrands, frequencyLabels } from '~/lib/brands';
+import { interpretScore } from '~/lib/interpret';
+
+const sessionOrResponse = await requireSession(Astro);
+if (sessionOrResponse instanceof Response) return sessionOrResponse;
+const user = sessionOrResponse;
+
+const res = await listBrands(Astro);
+const brands = res.ok ? res.data.brands : [];
+const limits = res.ok ? res.data.limits : null;
+const atLimit = limits !== null && brands.length >= limits.max_brands;
+const isFree  = user.plan === 'free';
+
+function relative(ts: string | null): string {
+  if (!ts) return '—';
+  const t = new Date(ts.replace(' ', 'T') + 'Z').getTime();
+  const dt = Math.floor((Date.now() - t) / 1000);
+  if (dt < 60) return 'just now';
+  if (dt < 3600) return `${Math.floor(dt/60)} min ago`;
+  if (dt < 86400) return `${Math.floor(dt/3600)} h ago`;
+  return `${Math.floor(dt/86400)} d ago`;
+}
+---
+<DashboardLayout title="Brands" user={user} active="brands">
+
+  <Fragment slot="header-actions">
+    {!atLimit && (
+      <a href="/dashboard/brands/new" class="btn-primary">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+        Add brand
+      </a>
+    )}
+  </Fragment>
+
+  {brands.length === 0 ? (
+    <div class="card p-10 text-center">
+      <div class="w-14 h-14 mx-auto rounded-xl inline-flex items-center justify-center"
+           style="background: var(--color-brand-soft);">
+        <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+             style="color: var(--color-brand-hover);">
+          <path d="M3 7l9 5 9-5M3 7v10l9 5 9-5V7M3 7l9-5 9 5"/>
+        </svg>
+      </div>
+      <h2 class="mt-4 text-lg font-semibold tracking-tight" style="color: var(--color-ink);">
+        No brands yet
+      </h2>
+      <p class="mt-1.5 text-sm max-w-sm mx-auto" style="color: var(--color-ink-muted);">
+        Add the domain you want to monitor. We'll detect the category, find your
+        competitors, and start measuring how often LLMs mention you.
+      </p>
+      <a href="/dashboard/brands/new" class="btn-primary mt-6">Add your first brand</a>
+    </div>
+  ) : (
+    <div class="space-y-3">
+      {brands.map(b => {
+        const score = b.latest_audit?.visibility_score ?? null;
+        const interp = interpretScore(score);
+        const toneColor =
+          interp.tone === 'good' ? 'var(--color-ok)' :
+          interp.tone === 'bad'  ? 'var(--color-bad)' :
+          interp.tone === 'okay' ? 'var(--color-warn)' :
+          'var(--color-ink-muted)';
+        return (
+          <a href={`/dashboard/brands/${b.id}`}
+             class="card p-5 block hover:shadow-sm transition-shadow group">
+            <div class="flex items-start justify-between gap-6">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2.5">
+                  <span class="w-7 h-7 rounded-lg inline-flex items-center justify-center text-[11px] font-semibold uppercase"
+                        style="background: var(--color-brand-soft); color: var(--color-brand-hover);">
+                    {b.domain.charAt(0)}
+                  </span>
+                  <h3 class="text-base font-semibold tracking-tight truncate" style="color: var(--color-ink);">
+                    {b.domain}
+                  </h3>
+                  <span class="text-[11px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full"
+                        style={b.scan_frequency === 'paused'
+                          ? 'background: var(--color-surface-muted); color: var(--color-ink-muted);'
+                          : 'background: var(--color-ok-soft); color: var(--color-ok);'}>
+                    {b.scan_frequency === 'paused' ? 'Paused' : frequencyLabels[b.scan_frequency]}
+                  </span>
+                </div>
+                <p class="mt-2 text-sm leading-relaxed" style={`color: ${toneColor};`}>
+                  {interp.headline}
+                </p>
+                <p class="mt-2 text-xs" style="color: var(--color-ink-subtle);">
+                  {b.last_scan_at ? `Last scan ${relative(b.last_scan_at)}` : 'No scan yet'}
+                  {b.next_scan_at && b.scan_frequency !== 'paused' && (
+                    <span> · Next scan {relative(b.next_scan_at)}</span>
+                  )}
+                </p>
+              </div>
+
+              <div class="text-right shrink-0">
+                <p class="text-[10px] uppercase tracking-wider" style="color: var(--color-ink-subtle);">Score</p>
+                <p class="mt-0.5 text-3xl font-bold tabular-nums" style={`color: ${toneColor};`}>
+                  {score === null ? '—' : `${Math.round(score)}`}
+                  {score !== null && <span class="text-base font-medium" style="color: var(--color-ink-subtle);">%</span>}
+                </p>
+              </div>
+            </div>
+          </a>
+        );
+      })}
+    </div>
+  )}
+
+  {isFree && brands.length > 0 && (
+    <div class="mt-6 rounded-xl p-5"
+         style="background: linear-gradient(135deg, #EEF2FF 0%, #FAF5FF 100%); border: 1px solid var(--color-brand-line);">
+      <div class="flex items-start gap-3">
+        <div class="w-8 h-8 rounded-lg shrink-0 inline-flex items-center justify-center"
+             style="background: var(--color-surface); color: var(--color-brand-hover);">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9z"/>
+          </svg>
+        </div>
+        <div class="flex-1">
+          <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Want continuous monitoring?</h3>
+          <p class="mt-1 text-sm leading-relaxed" style="color: var(--color-ink-muted);">
+            Your free audit is a one-off snapshot. Upgrade to track score changes day-over-day,
+            get email alerts when visibility drops, and unlock more LLMs + geographies.
+          </p>
+          <a href="https://onswer.app/#pricing" target="_blank" rel="noreferrer"
+             class="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold"
+             style="color: var(--color-brand-hover);">
+            See plans
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14M13 5l7 7-7 7"/>
+            </svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  )}
+</DashboardLayout>

@@ -1,0 +1,81 @@
+---
+/**
+ * /auth/verify?token=...
+ *
+ * The user clicked the magic link in their email. We hand the token to
+ * the API which validates it and Set-Cookie's the real session JWT.
+ * We then redirect them to /dashboard.
+ *
+ * SSR-only: this page runs entirely on the server, fetches /v1/auth/magic-link/verify
+ * with the token, forwards the Set-Cookie header to the browser, and redirects.
+ */
+import AuthLayout from '~/layouts/AuthLayout.astro';
+
+const token = Astro.url.searchParams.get('token') ?? '';
+
+let errorMsg: string | null = null;
+
+if (!token) {
+  errorMsg = 'Missing token. Open the link from your email again.';
+} else {
+  const apiUrl = (import.meta.env.PUBLIC_API_URL || 'http://api.onswer.local') + '/v1/auth/magic-link/verify';
+  try {
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+
+    if (res.ok) {
+      // Forward the Set-Cookie from the API to the browser. The API issued
+      // it with Domain=.onswer.app so it'll travel back to api.onswer.app
+      // on subsequent fetches.
+      const setCookie = res.headers.get('set-cookie');
+      if (setCookie) {
+        Astro.response.headers.append('set-cookie', setCookie);
+      }
+      return Astro.redirect('/dashboard', 302);
+    }
+
+    const body = await res.json().catch(() => null);
+    errorMsg = (body && typeof body === 'object' && 'error' in body)
+      ? String(body.error)
+      : 'Link expired or already used. Sign in again.';
+  } catch (e) {
+    errorMsg = 'Could not reach the server. Try again in a moment.';
+  }
+}
+---
+<AuthLayout title="Verifying">
+  <div class="card p-8 text-center">
+    {errorMsg ? (
+      <>
+        <div class="w-14 h-14 mx-auto rounded-full inline-flex items-center justify-center"
+             style="background: var(--color-bad-soft);">
+          <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+               style="color: var(--color-bad);">
+            <path d="M12 9v4M12 17h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <h2 class="mt-5 text-xl font-semibold tracking-tight" style="color: var(--color-ink);">
+          We couldn't sign you in
+        </h2>
+        <p class="mt-2 text-sm" style="color: var(--color-ink-muted);">
+          {errorMsg}
+        </p>
+        <a href="/login" class="btn-primary mt-6">Try again</a>
+      </>
+    ) : (
+      <>
+        <div class="w-14 h-14 mx-auto rounded-full inline-flex items-center justify-center animate-pulse"
+             style="background: var(--color-brand-soft);">
+          <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+               style="color: var(--color-brand-hover);">
+            <path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <p class="mt-5 text-sm" style="color: var(--color-ink-muted);">Signing you in…</p>
+      </>
+    )}
+  </div>
+</AuthLayout>

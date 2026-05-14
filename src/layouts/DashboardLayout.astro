@@ -1,0 +1,51 @@
+---
+/**
+ * Dashboard layout — sidebar + main column. Used by every authenticated
+ * page (/dashboard, /dashboard/brands/*, /dashboard/settings, etc.)
+ */
+import '~/styles/global.css';
+import Sidebar from '~/components/Sidebar.astro';
+import type { SessionUser } from '~/lib/auth';
+
+interface Props {
+  title: string;
+  user: SessionUser;
+  /** Which sidebar item is active. */
+  active?: 'overview' | 'brands' | 'audits' | 'settings';
+}
+const { title, user, active = 'overview' } = Astro.props;
+---
+<!doctype html>
+<html lang={user.locale || 'en'}>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title} — Onswer</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://rsms.me/" />
+  <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+</head>
+<body class="min-h-screen">
+
+  <div class="flex min-h-screen">
+    <Sidebar active={active} user={user} />
+
+    <main class="flex-1 min-w-0">
+      <header class="border-b sticky top-0 z-10 backdrop-blur"
+              style="border-color: var(--color-border); background: rgba(250, 250, 250, 0.85);">
+        <div class="px-8 py-5 flex items-center justify-between">
+          <h1 class="text-lg font-semibold tracking-tight" style="color: var(--color-ink);">
+            {title}
+          </h1>
+          <slot name="header-actions" />
+        </div>
+      </header>
+
+      <div class="px-8 py-8 max-w-6xl">
+        <slot />
+      </div>
+    </main>
+  </div>
+</body>
+</html>

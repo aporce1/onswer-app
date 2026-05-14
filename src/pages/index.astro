@@ -1,0 +1,15 @@
+---
+/**
+ * Root entry — redirect based on session state.
+ *
+ *   Has cookie  → /dashboard (where requireSession() will validate it)
+ *   No cookie   → /login
+ *
+ * We do the redirect at the Astro layer instead of forcing the user
+ * through /dashboard → 302 → /login, because that double-hop adds latency
+ * and the cookie check here is free (no API call).
+ */
+const cookie = Astro.request.headers.get('cookie') ?? '';
+const hasSession = cookie.includes('onswer_session=');
+return Astro.redirect(hasSession ? '/dashboard' : '/login', 302);
+---

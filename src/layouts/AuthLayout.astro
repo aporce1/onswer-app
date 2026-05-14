@@ -1,0 +1,60 @@
+---
+/**
+ * Auth pages layout — centered card on a soft gradient background.
+ * Used by /login and /auth/verify. Intentionally minimal: no nav, no
+ * sidebar. The user is in a focused state (signing in) and we don't
+ * want to give them anything else to look at.
+ */
+import '~/styles/global.css';
+
+interface Props {
+  title: string;
+}
+const { title } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title} — Onswer</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <link rel="preconnect" href="https://rsms.me/" />
+  <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+</head>
+<body class="min-h-screen flex items-center justify-center px-4 py-12 relative overflow-hidden">
+
+  <!-- Soft gradient backdrop — barely there, just enough to keep the
+       white card from looking flat against the bg. -->
+  <div class="absolute inset-0 -z-10 pointer-events-none"
+       style="background:
+         radial-gradient(900px 500px at 50% -10%, rgba(99, 102, 241, 0.07), transparent 60%),
+         radial-gradient(700px 400px at 90% 110%, rgba(168, 85, 247, 0.05), transparent 60%);">
+  </div>
+
+  <main class="w-full max-w-md">
+    <!-- Logo -->
+    <a href="https://onswer.app" class="flex items-center justify-center gap-2.5 mb-10 group">
+      <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" class="w-9 h-9 transition-transform group-hover:scale-105">
+        <defs>
+          <linearGradient id="onswer-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%"   stop-color="#4F46E5"/>
+            <stop offset="50%"  stop-color="#7C3AED"/>
+            <stop offset="100%" stop-color="#06B6D4"/>
+          </linearGradient>
+        </defs>
+        <circle cx="32" cy="32" r="20" fill="none" stroke="url(#onswer-grad)" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="32" cy="32" r="5" fill="url(#onswer-grad)"/>
+      </svg>
+      <span class="text-lg font-semibold tracking-tight" style="color: var(--color-ink);">Onswer</span>
+    </a>
+
+    <slot />
+
+    <p class="text-center mt-8 text-xs" style="color: var(--color-ink-subtle);">
+      &copy; {new Date().getFullYear()} Onswer · <a href="https://onswer.app" class="hover:underline">onswer.app</a>
+    </p>
+  </main>
+</body>
+</html>

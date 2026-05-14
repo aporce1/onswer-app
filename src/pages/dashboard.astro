@@ -1,0 +1,75 @@
+---
+/**
+ * /dashboard — overview / landing page when the user is signed in.
+ *
+ * MVP: just shows an empty state with a clear CTA to add the first brand.
+ * Once we have data: KPI cards, recent activity, mini chart.
+ */
+import DashboardLayout from '~/layouts/DashboardLayout.astro';
+import { requireSession } from '~/lib/auth';
+
+const sessionOrResponse = await requireSession(Astro);
+if (sessionOrResponse instanceof Response) return sessionOrResponse;
+const user = sessionOrResponse;
+---
+<DashboardLayout title="Overview" user={user} active="overview">
+
+  <!-- Welcome / empty state -->
+  <div class="card p-10 text-center">
+    <div class="w-16 h-16 mx-auto rounded-2xl inline-flex items-center justify-center"
+         style="background: var(--color-brand-soft);">
+      <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+           style="color: var(--color-brand-hover);">
+        <path d="M3 7l9 5 9-5M3 7v10l9 5 9-5V7M3 7l9-5 9 5"/>
+      </svg>
+    </div>
+
+    <h2 class="mt-5 text-2xl font-semibold tracking-tight" style="color: var(--color-ink);">
+      Welcome to Onswer, {user.email.split('@')[0]}
+    </h2>
+    <p class="mt-2 text-sm max-w-md mx-auto leading-relaxed" style="color: var(--color-ink-muted);">
+      Add a brand to start tracking how often LLMs mention it when buyers ask
+      category questions. We'll re-scan it daily and email you when your
+      visibility shifts.
+    </p>
+
+    <a href="/dashboard/brands/new" class="btn-primary mt-7">
+      Add your first brand
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14M13 5l7 7-7 7"/>
+      </svg>
+    </a>
+
+    <!-- Three-step inline tutorial — auto-explanatory, not a tour overlay -->
+    <div class="mt-12 grid sm:grid-cols-3 gap-4 max-w-3xl mx-auto text-left">
+
+      <div class="rounded-xl p-4" style="background: var(--color-surface-muted); border: 1px solid var(--color-border);">
+        <div class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-semibold mb-3"
+             style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink);">1</div>
+        <p class="text-sm font-medium" style="color: var(--color-ink);">Add your domain</p>
+        <p class="text-xs mt-1 leading-relaxed" style="color: var(--color-ink-muted);">
+          We auto-detect competitors and category from your site.
+        </p>
+      </div>
+
+      <div class="rounded-xl p-4" style="background: var(--color-surface-muted); border: 1px solid var(--color-border);">
+        <div class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-semibold mb-3"
+             style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink);">2</div>
+        <p class="text-sm font-medium" style="color: var(--color-ink);">Pick a cadence</p>
+        <p class="text-xs mt-1 leading-relaxed" style="color: var(--color-ink-muted);">
+          Daily for Pro, weekly for Solo. Switch any time.
+        </p>
+      </div>
+
+      <div class="rounded-xl p-4" style="background: var(--color-surface-muted); border: 1px solid var(--color-border);">
+        <div class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-semibold mb-3"
+             style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink);">3</div>
+        <p class="text-sm font-medium" style="color: var(--color-ink);">Watch your score evolve</p>
+        <p class="text-xs mt-1 leading-relaxed" style="color: var(--color-ink-muted);">
+          Track score changes over time and act on recommendations.
+        </p>
+      </div>
+    </div>
+  </div>
+
+</DashboardLayout>

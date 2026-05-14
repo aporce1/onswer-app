@@ -1,0 +1,158 @@
+@import 'tailwindcss';
+
+/* =============================================================================
+   Onswer Dashboard — light theme premium (Plausible/Stripe style)
+   =============================================================================
+   Design intent: this is a workspace, not a landing page. Calm, neutral,
+   data-first. The landing is dark and dramatic because it has 30 seconds
+   to convert. The dashboard is light and quiet because the user spends
+   10 minutes here, multiple times a week, processing information.
+
+   Color tokens follow the Stripe Dashboard / Plausible Analytics tradition:
+   - 95% of pixels are neutral grays
+   - Brand color (indigo) is used ONLY for: primary action buttons,
+     active state in nav, hover on interactive elements, and highlighted
+     KPI numbers. Not for decoration.
+   - Status colors (success/warn/danger) are slightly desaturated so they
+     don't scream when the dashboard has a few of them stacked.
+
+   We keep the indigo accent shared with the landing (#6366F1) so the
+   brand identity is continuous when a user clicks "Sign in" from
+   onswer.app and lands on app.onswer.app — they feel like the same
+   product, just a different mode.
+   ============================================================================= */
+
+@theme {
+  /* Neutrals — backgrounds, surfaces, dividers, text */
+  --color-bg:            #FAFAFA;  /* page bg (off-white, NOT pure white) */
+  --color-surface:       #FFFFFF;  /* cards on top of bg */
+  --color-surface-hover: #F4F4F5;  /* card hover state */
+  --color-surface-muted: #F9FAFB;  /* table header rows, code blocks */
+
+  --color-border:        #E4E4E7;  /* default dividers */
+  --color-border-strong: #D4D4D8;  /* form inputs, more prominent */
+
+  --color-ink:           #18181B;  /* primary text */
+  --color-ink-muted:     #52525B;  /* secondary text */
+  --color-ink-subtle:    #A1A1AA;  /* tertiary / placeholder */
+
+  /* Brand (shared with landing for continuity) */
+  --color-brand:         #6366F1;
+  --color-brand-hover:   #4F46E5;
+  --color-brand-soft:    #EEF2FF;  /* tinted backgrounds for highlighted areas */
+  --color-brand-line:    #C7D2FE;  /* subtle borders that should still read as brand */
+
+  /* Status — desaturated for dashboard calm */
+  --color-ok:            #15803D;  /* green-700 */
+  --color-ok-soft:       #DCFCE7;  /* green-100 */
+  --color-warn:          #B45309;  /* amber-700 */
+  --color-warn-soft:     #FEF3C7;  /* amber-100 */
+  --color-bad:           #B91C1C;  /* red-700 */
+  --color-bad-soft:      #FEE2E2;  /* red-100 */
+
+  /* Typography */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Courier New', monospace;
+
+  /* Easings — used by transitions to feel premium */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+
+  /* Shadows — extremely subtle. The light theme leans on borders, not depth. */
+  --shadow-card:   0 1px 2px rgba(24, 24, 27, 0.04), 0 1px 1px rgba(24, 24, 27, 0.03);
+  --shadow-pop:    0 4px 12px rgba(24, 24, 27, 0.06), 0 2px 4px rgba(24, 24, 27, 0.04);
+  --shadow-modal:  0 16px 40px rgba(24, 24, 27, 0.10), 0 8px 16px rgba(24, 24, 27, 0.06);
+}
+
+/* -----------------------------------------------------------------------------
+   Base resets specific to the dashboard
+   ----------------------------------------------------------------------------- */
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-feature-settings: 'tnum'; /* tabular numerals for tables / KPIs */
+}
+
+/* Slim, neutral scrollbar — matches the Stripe/Linear aesthetic */
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--color-ink-subtle); }
+
+/* -----------------------------------------------------------------------------
+   Reusable utility classes (one-offs that don't deserve a Tailwind plugin yet)
+   ----------------------------------------------------------------------------- */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--shadow-card);
+}
+.card-flat {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+}
+
+/* Input style used across forms */
+.input {
+  width: 100%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-ink);
+  transition: border-color 0.15s var(--ease-out-quart), box-shadow 0.15s var(--ease-out-quart);
+}
+.input:focus {
+  outline: none;
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+.input::placeholder { color: var(--color-ink-subtle); }
+
+/* Primary button */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--color-brand);
+  color: white;
+  font-weight: 500;
+  font-size: 0.875rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  transition: background-color 0.15s var(--ease-out-quart);
+  border: 1px solid transparent;
+}
+.btn-primary:hover { background: var(--color-brand-hover); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Secondary button — neutral */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-weight: 500;
+  font-size: 0.875rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-border-strong);
+  transition: background-color 0.15s var(--ease-out-quart);
+}
+.btn-secondary:hover { background: var(--color-surface-hover); }

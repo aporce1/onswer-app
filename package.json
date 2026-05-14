@@ -1,0 +1,24 @@
+{
+  "name": "onswer-app",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "astro": "^5.1.0",
+    "@astrojs/vercel": "^8.0.0",
+    "@tailwindcss/vite": "^4.0.0",
+    "tailwindcss": "^4.0.0",
+    "apexcharts": "^4.3.0",
+    "lucide": "^0.469.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

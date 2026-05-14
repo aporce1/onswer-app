@@ -1,0 +1,128 @@
+---
+/**
+ * /login — magic link entry point.
+ *
+ * UX:
+ *   1. User lands here, types email, submits
+ *   2. We POST /v1/auth/magic-link to the API
+ *   3. We show the "Check your inbox" state (no separate page — just a
+ *      conditional render so the user doesn't lose context)
+ *   4. They click the link in their email → /auth/verify?token=... → cookie
+ *      → /dashboard
+ *
+ * No password fallback. If we add password later it's a separate flow.
+ *
+ * The form is form-action'd to a server endpoint (/api/login) so SSR can
+ * render the success state without JavaScript. Progressive enhancement
+ * second pass adds inline-fetch behavior. For MVP, full reload is fine —
+ * the user does this once per device per week at most.
+ */
+import AuthLayout from '~/layouts/AuthLayout.astro';
+import { api } from '~/lib/api';
+
+let state: 'form' | 'sent' | 'error' = 'form';
+let email = '';
+let errorMsg = '';
+
+if (Astro.request.method === 'POST') {
+  const formData = await Astro.request.formData();
+  email = String(formData.get('email') ?? '').trim();
+
+  if (!email || !email.includes('@')) {
+    state = 'error';
+    errorMsg = 'Please enter a valid email address.';
+  } else {
+    const res = await api('/v1/auth/magic-link', {
+      method: 'POST',
+      body: { email },
+    });
+    if (res.ok) {
+      state = 'sent';
+    } else {
+      // Even on backend error, prefer "sent" state to avoid email enumeration.
+      // Only surface the error in dev or if it's a clear validation issue.
+      if (import.meta.env.DEV && 'error' in res) {
+        state = 'error';
+        errorMsg = res.error;
+      } else {
+        state = 'sent'; // privacy-safe default
+      }
+    }
+  }
+}
+---
+<AuthLayout title={state === 'sent' ? 'Check your inbox' : 'Sign in'}>
+
+  {state === 'form' && (
+    <div class="card p-7">
+      <h2 class="text-xl font-semibold tracking-tight" style="color: var(--color-ink);">
+        Sign in to Onswer
+      </h2>
+      <p class="mt-1.5 text-sm" style="color: var(--color-ink-muted);">
+        We'll email you a magic link — no password to remember.
+      </p>
+
+      <form method="POST" class="mt-6 space-y-4">
+        <div>
+          <label for="email" class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">
+            Email
+          </label>
+          <input id="email" name="email" type="email" required autocomplete="email" autofocus
+                 placeholder="you@company.com"
+                 class="input" />
+        </div>
+
+        <button type="submit" class="btn-primary w-full">
+          Send magic link
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M5 12h14M13 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
+
+      <p class="mt-6 text-xs text-center" style="color: var(--color-ink-subtle);">
+        New to Onswer? <a href="https://onswer.app" class="font-medium hover:underline" style="color: var(--color-brand-hover);">Start with a free audit</a> first.
+      </p>
+    </div>
+  )}
+
+  {state === 'sent' && (
+    <div class="card p-8 text-center">
+      <div class="w-14 h-14 mx-auto rounded-full inline-flex items-center justify-center"
+           style="background: var(--color-brand-soft);">
+        <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+             style="color: var(--color-brand-hover);">
+          <path d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+      </div>
+      <h2 class="mt-5 text-xl font-semibold tracking-tight" style="color: var(--color-ink);">
+        Check your inbox
+      </h2>
+      <p class="mt-2 text-sm leading-relaxed" style="color: var(--color-ink-muted);">
+        We sent a sign-in link to<br/>
+        <strong style="color: var(--color-ink);">{email}</strong>
+      </p>
+      <p class="mt-4 text-xs" style="color: var(--color-ink-subtle);">
+        The link expires in 15 minutes. Didn't get it? Check spam, or
+        <a href="/login" class="font-medium underline" style="color: var(--color-brand-hover);">try again</a>.
+      </p>
+    </div>
+  )}
+
+  {state === 'error' && (
+    <div class="card p-7">
+      <div class="rounded-lg p-3 mb-5 text-sm"
+           style="background: var(--color-bad-soft); color: var(--color-bad);">
+        {errorMsg}
+      </div>
+      <form method="POST" class="space-y-4">
+        <input name="email" type="email" required autocomplete="email" autofocus
+               value={email}
+               placeholder="you@company.com"
+               class="input" />
+        <button type="submit" class="btn-primary w-full">Send magic link</button>
+      </form>
+    </div>
+  )}
+
+</AuthLayout>

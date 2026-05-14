@@ -37,7 +37,20 @@ function relative(ts: string | null): string {
 <DashboardLayout title="Brands" user={user} active="brands">
 
   <Fragment slot="header-actions">
-    {!atLimit && (
+    {atLimit ? (
+      <div class="flex items-center gap-2.5">
+        <span class="text-xs px-2.5 py-1 rounded-full"
+              style="background: var(--color-warn-soft); color: var(--color-warn);">
+          {limits!.max_brands} of {limits!.max_brands} brands used
+        </span>
+        <a href="https://onswer.app/#pricing" target="_blank" rel="noreferrer" class="btn-primary">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9z"/>
+          </svg>
+          Upgrade for more
+        </a>
+      </div>
+    ) : (
       <a href="/dashboard/brands/new" class="btn-primary">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 5v14M5 12h14"/>

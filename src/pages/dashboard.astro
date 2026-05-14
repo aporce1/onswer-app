@@ -16,16 +16,18 @@ const sessionOrResponse = await requireSession(Astro);
 if (sessionOrResponse instanceof Response) return sessionOrResponse;
 const user = sessionOrResponse;
 
+// ?tour=1 forces a replay (from /settings → Replay onboarding). When set
+// we DON'T redirect to /brands even if the user already has brands,
+// otherwise the tour can't show its welcome-state anchors.
+const forceTour = Astro.url.searchParams.get('tour') === '1';
+
 const res = await listBrands(Astro);
 const brands = res.ok ? res.data.brands : [];
-if (brands.length > 0) {
+if (brands.length > 0 && !forceTour) {
   return Astro.redirect('/dashboard/brands', 302);
 }
 
 const firstName = user.email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-
-// ?tour=1 forces a replay (from /settings → Replay onboarding).
-const forceTour = Astro.url.searchParams.get('tour') === '1';
 ---
 <DashboardLayout title="Welcome" user={user} active="overview" width="hero">
 

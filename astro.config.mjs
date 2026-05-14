@@ -34,6 +34,21 @@ export default defineConfig({
     },
   },
 
+  // Astro 5's SSR CSRF guard rejects POSTs whose Origin doesn't match the
+  // host of the page handling them. Behind Vercel's proxy the resolved
+  // host can differ from what Astro sees on the request, causing "Cross-
+  // site POST form submissions are forbidden" on legit same-origin posts.
+  //
+  // We disable the built-in check because:
+  //   1. Our actual sensitive endpoints live on api.onswer.app, not here.
+  //   2. The API has its own auth (JWT cookie) which already prevents
+  //      cross-site abuse — a CSRF attempt to /login is harmless because
+  //      it can only ask for a magic link, not perform a real action.
+  //   3. /login does not mutate any state in app.onswer.app itself.
+  security: {
+    checkOrigin: false,
+  },
+
   // Dev server: bind to app.onswer.local so cookies with Domain=.onswer.local
   // travel between this app and the PHP API at api.onswer.local. Without
   // this, browsers treat localhost:4322 and api.onswer.local as unrelated

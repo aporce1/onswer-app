@@ -20,6 +20,10 @@ import {
   frequencyLabels, type ScanFrequency,
 } from '~/lib/brands';
 import {
+  getAudit, requestAiInterpretation,
+  type AuditAnswer, type AuditDetail,
+} from '~/lib/audits';
+import {
   interpretScore, interpretScoreDelta, interpretCadence,
 } from '~/lib/interpret';
 
@@ -33,8 +37,9 @@ if (!Number.isFinite(id) || id <= 0) {
 }
 
 let flash: string | null = null;
+let aiFlash: { tone: 'ok' | 'error', message: string } | null = null;
 
-// Handle form submissions (schedule change + delete) before fetching the page.
+// Handle form submissions (schedule change + delete + ai-interpret) before fetching the page.
 if (Astro.request.method === 'POST') {
   const form = await Astro.request.formData();
   const action = String(form.get('action') ?? '');
@@ -50,6 +55,19 @@ if (Astro.request.method === 'POST') {
       flash = `Your plan caps cadence at ${res.data.limits.max_frequency}. Set to that instead.`;
     }
   }
+  if (action === 'ai-interpret') {
+    const auditId = Number(form.get('audit_id') ?? 0);
+    if (auditId > 0) {
+      const refresh = form.get('refresh') === '1';
+      const aiRes = await requestAiInterpretation(Astro, auditId, refresh);
+      if (!aiRes.ok) {
+        aiFlash = {
+          tone: 'error',
+          message: 'error' in aiRes ? aiRes.error : 'AI analysis failed. Try again in a moment.',
+        };
+      }
+    }
+  }
 }
 
 const welcomeNew = Astro.url.searchParams.get('welcome') === '1';
@@ -59,6 +77,18 @@ if (!res.ok) {
   return Astro.redirect('/dashboard/brands', 302);
 }
 const { brand, audits, limits } = res.data;
+
+// Pull the FULL latest completed audit so the brand detail can show recos,
+// per-LLM breakdown, citations, competitors, failed queries — all in one
+// page. Otherwise the user only sees a flat score + a history table and
+// has to drill into an audit row to find the actual insights.
+const latestCompleted = audits.find(a => a.status === 'completed' && a.visibility_score !== null);
+let latestAudit: AuditDetail | null = null;
+if (latestCompleted) {
+  const auditRes = await getAudit(Astro, latestCompleted.id);
+  if (auditRes.ok) latestAudit = auditRes.data;
+}
+const canUseAi = ['pro', 'agency'].includes(user.plan);
 
 const planRank: Record<string, number> = { free: 0, solo: 1, pro: 2, agency: 2 };
 const userRank = planRank[user.plan] ?? 0;
@@ -95,6 +125,72 @@ const toneColor =
   scoreInterp.tone === 'bad'  ? 'var(--color-bad)' :
   scoreInterp.tone === 'okay' ? 'var(--color-warn)' :
   'var(--color-ink-muted)';
+
+// =============================================================
+// Compute the rich insights from the latest completed audit so the
+// JSX below can stay readable. All these are no-ops (empty arrays /
+// nulls) when there's no completed audit yet — the JSX guards them.
+// =============================================================
+
+interface LlmStat { name: string; mentioned: number; total: number; rate: number; }
+const llmBreakdown: LlmStat[] = (() => {
+  if (!latestAudit) return [];
+  const m = new Map<string, AuditAnswer[]>();
+  for (const a of latestAudit.answers) {
+    const k = a.llm.display_name || a.llm.slug || 'Unknown';
+    if (!m.has(k)) m.set(k, []);
+    m.get(k)!.push(a);
+  }
+  return Array.from(m.entries()).map(([name, arr]) => {
+    const mentioned = arr.filter(a => a.brand_mentioned).length;
+    return { name, mentioned, total: arr.length, rate: arr.length > 0 ? mentioned / arr.length : 0 };
+  }).sort((a, b) => b.rate - a.rate);
+})();
+
+// Geo coverage — distinct geo codes from answers, with a friendly label.
+const geoCoverage: Array<{ code: string; name: string; count: number }> = (() => {
+  if (!latestAudit) return [];
+  const m = new Map<string, { code: string; name: string; count: number }>();
+  for (const a of latestAudit.answers) {
+    const code = (a.geo?.code || 'us').toLowerCase();
+    if (!m.has(code)) {
+      m.set(code, { code, name: a.geo?.name || code.toUpperCase(), count: 0 });
+    }
+    m.get(code)!.count++;
+  }
+  return Array.from(m.values()).sort((a, b) => b.count - a.count);
+})();
+
+// Failed queries = queries where NO LLM mentioned the brand.
+const failedQueries: string[] = (() => {
+  if (!latestAudit) return [];
+  const byQ = new Map<string, AuditAnswer[]>();
+  for (const a of latestAudit.answers) {
+    if (!byQ.has(a.query_text)) byQ.set(a.query_text, []);
+    byQ.get(a.query_text)!.push(a);
+  }
+  const out: string[] = [];
+  for (const [q, arr] of byQ.entries()) {
+    if (arr.every(a => !a.brand_mentioned)) out.push(q);
+  }
+  return out.slice(0, 5);
+})();
+
+// Recos grouped by priority for visual hierarchy.
+const recosByPriority = {
+  high:   latestAudit?.recommendations.filter(r => r.priority === 'high')   ?? [],
+  medium: latestAudit?.recommendations.filter(r => r.priority === 'medium') ?? [],
+  low:    latestAudit?.recommendations.filter(r => r.priority === 'low')    ?? [],
+};
+
+// Country flag emoji from ISO code (cosmetic — makes the geo chips
+// instantly readable).
+function flagEmoji(code: string): string {
+  const cc = code.toUpperCase();
+  if (cc.length !== 2) return '🌐';
+  return String.fromCodePoint(0x1F1E6 + cc.charCodeAt(0) - 65)
+       + String.fromCodePoint(0x1F1E6 + cc.charCodeAt(1) - 65);
+}
 ---
 <DashboardLayout title={brand.domain} user={user} active="brands">
 
@@ -139,6 +235,17 @@ const toneColor =
           <h2 class="mt-1 text-2xl font-bold tracking-tight" style="color: var(--color-ink);">{brand.domain}</h2>
           {brand.industry && (
             <p class="mt-1 text-sm" style="color: var(--color-ink-muted);">{brand.industry}</p>
+          )}
+          {geoCoverage.length > 0 && (
+            <div class="mt-3 flex flex-wrap items-center gap-1.5">
+              <span class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Geos:</span>
+              {geoCoverage.map(g => (
+                <span class="inline-flex items-center gap-1 text-xs"
+                      style="color: var(--color-ink-muted);">
+                  <span class="text-sm leading-none">{flagEmoji(g.code)}</span>{g.name}
+                </span>
+              ))}
+            </div>
           )}
         </div>
 
@@ -240,6 +347,291 @@ const toneColor =
       score: a.visibility_score,
     }))} height={300} />
   </div>
+
+  {/* ====================================================================
+       LATEST AUDIT INSIGHTS — every meaningful slice of the most recent
+       completed audit pulled inline so the brand detail is a one-stop
+       page. Falls back to a friendly empty state when there's no
+       completed audit yet (free brand or brand-new audit running).
+     ==================================================================== */}
+
+  {latestAudit ? (
+    <>
+      <div class="flex items-center justify-between flex-wrap gap-3 mb-3">
+        <h3 class="text-base font-semibold tracking-tight" style="color: var(--color-ink);">
+          Latest scan insights
+        </h3>
+        <p class="text-xs" style="color: var(--color-ink-subtle);">
+          Audit #{latestAudit.id} · {fmtDate(latestAudit.completed_at)}
+          <a href={`/dashboard/audits/${latestAudit.id}`}
+             class="ml-2 font-semibold hover:underline" style="color: var(--color-brand-hover);">
+            Open drill-down →
+          </a>
+        </p>
+      </div>
+
+      {/* AI INTERPRETATION (Pro+) ----------------------------------- */}
+      <div class="card overflow-hidden mb-5"
+           style={latestAudit.ai_interpretation
+             ? 'background: linear-gradient(180deg, var(--color-brand-soft) 0%, var(--color-surface) 30%); border: 1px solid var(--color-brand-line);'
+             : ''}>
+        <div class="p-5">
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div class="flex items-start gap-3">
+              <div class="w-8 h-8 rounded-lg shrink-0 inline-flex items-center justify-center"
+                   style="background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 50%, #06B6D4 100%); color: white;">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2L9 9l-7 1 5 5-1 7 6-3 6 3-1-7 5-5-7-1z"/>
+                </svg>
+              </div>
+              <div>
+                <h4 class="text-sm font-semibold" style="color: var(--color-ink);">AI executive analysis</h4>
+                <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
+                  {latestAudit.ai_interpretation
+                    ? `Claude wrote a three-paragraph brief on this scan. Refresh for a different angle.`
+                    : `Have Claude read this scan and write what's the headline, why, and what to do this week.`}
+                </p>
+              </div>
+            </div>
+
+            {canUseAi && (
+              <form method="POST">
+                <input type="hidden" name="action" value="ai-interpret" />
+                <input type="hidden" name="audit_id" value={latestAudit.id} />
+                {latestAudit.ai_interpretation && <input type="hidden" name="refresh" value="1" />}
+                <button type="submit" class="btn-primary">
+                  <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    {latestAudit.ai_interpretation ? (
+                      <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                    ) : (
+                      <path d="M13 2L3 14h9l-1 8 10-12h-9z"/>
+                    )}
+                  </svg>
+                  {latestAudit.ai_interpretation ? 'Regenerate' : 'Get AI analysis'}
+                </button>
+              </form>
+            )}
+
+            {!canUseAi && (
+              <a href="https://onswer.app/#pricing" target="_blank" rel="noreferrer"
+                 class="btn-primary">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9z"/>
+                </svg>
+                Unlock with Pro
+              </a>
+            )}
+          </div>
+
+          {aiFlash && (
+            <div class="mt-4 rounded-lg px-3 py-2 text-xs"
+                 style={aiFlash.tone === 'ok'
+                   ? 'background: var(--color-ok-soft); color: var(--color-ok);'
+                   : 'background: var(--color-bad-soft); color: var(--color-bad);'}>
+              {aiFlash.message}
+            </div>
+          )}
+
+          {latestAudit.ai_interpretation && (
+            <div class="mt-5 pt-5 border-t" style="border-color: var(--color-brand-line);">
+              {latestAudit.ai_interpretation.split(/\n\n+/).map(p => (
+                <p class="text-sm leading-relaxed mb-3 last:mb-0" style="color: var(--color-ink);">{p.trim()}</p>
+              ))}
+              {latestAudit.ai_interpretation_generated_at && (
+                <p class="mt-4 text-[11px]" style="color: var(--color-ink-subtle);">
+                  Generated {new Date(latestAudit.ai_interpretation_generated_at.replace(' ', 'T') + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} by Claude
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* TWO-COL: PER-LLM + GEO COVERAGE ------------------------------ */}
+      <div class="grid lg:grid-cols-2 gap-6 mb-5">
+
+        {/* Per-LLM breakdown ---------------------------------------- */}
+        {llmBreakdown.length > 0 && (
+          <div class="card p-6">
+            <h4 class="text-sm font-semibold" style="color: var(--color-ink);">By model</h4>
+            <p class="text-xs mt-0.5 mb-4" style="color: var(--color-ink-muted);">
+              How often each LLM mentions you. Green = strong · amber = mixed · red = blind spot.
+            </p>
+            <div class="space-y-3.5">
+              {llmBreakdown.map(l => (
+                <div>
+                  <div class="flex items-center justify-between mb-1.5">
+                    <p class="text-sm font-medium" style="color: var(--color-ink);">{l.name}</p>
+                    <p class="text-xs font-mono tabular-nums" style="color: var(--color-ink-muted);">
+                      {l.mentioned}/{l.total} · <span style={`color: ${l.rate >= 0.6 ? 'var(--color-ok)' : l.rate >= 0.3 ? 'var(--color-warn)' : 'var(--color-bad)'};`}>{Math.round(l.rate * 100)}%</span>
+                    </p>
+                  </div>
+                  <div class="w-full h-1.5 rounded-full overflow-hidden" style="background: var(--color-surface-muted);">
+                    <div class="h-full rounded-full transition-all duration-700"
+                         style={`width: ${l.rate * 100}%; background: ${l.rate >= 0.6 ? 'var(--color-ok)' : l.rate >= 0.3 ? 'var(--color-warn)' : 'var(--color-bad)'};`}></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Geo coverage --------------------------------------------- */}
+        {geoCoverage.length > 0 && (
+          <div class="card p-6">
+            <h4 class="text-sm font-semibold" style="color: var(--color-ink);">Geographies scanned</h4>
+            <p class="text-xs mt-0.5 mb-4" style="color: var(--color-ink-muted);">
+              We ran your queries from each region. {geoCoverage.length > 1 ? 'Differences across regions hint at where buyers see you differently.' : 'Upgrade to Pro for multi-geo coverage.'}
+            </p>
+            <div class="flex flex-wrap gap-2">
+              {geoCoverage.map(g => (
+                <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium"
+                      style="background: var(--color-surface-muted); border: 1px solid var(--color-border); color: var(--color-ink);">
+                  <span class="text-base leading-none">{flagEmoji(g.code)}</span>
+                  {g.name}
+                  <span class="text-[11px] font-mono ml-1" style="color: var(--color-ink-subtle);">{g.count}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* RECOMMENDATIONS --------------------------------------------- */}
+      {latestAudit.recommendations.length > 0 && (
+        <div class="mb-5">
+          <div class="flex items-end justify-between mb-3 flex-wrap gap-2">
+            <div>
+              <h4 class="text-sm font-semibold" style="color: var(--color-ink);">Recommendations</h4>
+              <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
+                Specific actions to move your score. Start with high priority.
+              </p>
+            </div>
+          </div>
+
+          {(['high', 'medium', 'low'] as const).map(priority => {
+            const items = recosByPriority[priority];
+            if (items.length === 0) return null;
+            const chipStyle = priority === 'high'
+              ? 'background: var(--color-bad-soft); color: var(--color-bad);'
+              : priority === 'medium'
+                ? 'background: var(--color-warn-soft); color: var(--color-warn);'
+                : 'background: var(--color-surface-muted); color: var(--color-ink-muted);';
+            return (
+              <div class="mb-4">
+                <div class="flex items-center gap-2 mb-2.5">
+                  <span class="text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full"
+                        style={chipStyle}>
+                    {priority} priority
+                  </span>
+                  <span class="text-xs" style="color: var(--color-ink-subtle);">
+                    {items.length} item{items.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+                <div class="grid sm:grid-cols-2 gap-3">
+                  {items.map(r => (
+                    <div class="card p-5">
+                      <div class="flex items-center justify-between text-[10px] uppercase tracking-wider mb-2">
+                        <span style="color: var(--color-ink-subtle);">{r.category}</span>
+                        <span class="px-2 py-0.5 rounded-full font-semibold"
+                              style="background: var(--color-surface-muted); color: var(--color-ink-muted);">
+                          {r.effort} effort
+                        </span>
+                      </div>
+                      <p class="text-sm font-semibold leading-snug" style="color: var(--color-ink);">{r.title}</p>
+                      <p class="mt-1.5 text-xs leading-relaxed" style="color: var(--color-ink-muted);">{r.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* FAILED QUERIES CALLOUT -------------------------------------- */}
+      {failedQueries.length > 0 && (
+        <div class="card p-5 mb-5"
+             style="border-left: 3px solid var(--color-warn);">
+          <div class="flex items-start gap-3">
+            <div class="w-8 h-8 rounded-lg shrink-0 inline-flex items-center justify-center"
+                 style="background: var(--color-warn-soft); color: var(--color-warn);">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01"/>
+              </svg>
+            </div>
+            <div class="flex-1">
+              <h4 class="text-sm font-semibold" style="color: var(--color-ink);">Queries where NO LLM mentioned you</h4>
+              <p class="text-xs mt-1 leading-relaxed" style="color: var(--color-ink-muted);">
+                Your biggest wins. Fix any one and your visibility jumps. Each is a content gap.
+              </p>
+              <ul class="mt-3 space-y-2">
+                {failedQueries.map(q => (
+                  <li class="text-sm font-medium px-3 py-2 rounded-lg"
+                      style="background: var(--color-surface-muted); color: var(--color-ink);">
+                    "{q}"
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TOP CITED + COMPETITORS ------------------------------------- */}
+      {(latestAudit.top_cited_domains.length > 0 || latestAudit.suggested_competitors.length > 0) && (
+        <div class="grid lg:grid-cols-2 gap-6 mb-5">
+          {latestAudit.top_cited_domains.length > 0 && (
+            <div class="card p-6">
+              <h4 class="text-sm font-semibold" style="color: var(--color-ink);">Top cited sources</h4>
+              <p class="text-xs mt-0.5 mb-4" style="color: var(--color-ink-muted);">
+                Sites the LLMs trust. Get linked from these.
+              </p>
+              <div class="space-y-1.5">
+                {latestAudit.top_cited_domains.map((c, i) => (
+                  <div class="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-[var(--color-surface-muted)]">
+                    <div class="flex items-center gap-3 min-w-0">
+                      <span class="text-xs font-mono w-5 text-right" style="color: var(--color-ink-subtle);">#{i + 1}</span>
+                      <span class="text-sm font-medium truncate" style="color: var(--color-ink);">{c.domain}</span>
+                    </div>
+                    <span class="text-xs font-mono tabular-nums shrink-0" style="color: var(--color-ink-muted);">{c.n} cite{c.n === 1 ? '' : 's'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {latestAudit.suggested_competitors.length > 0 && (
+            <div class="card p-6">
+              <h4 class="text-sm font-semibold" style="color: var(--color-ink);">Auto-detected competitors</h4>
+              <p class="text-xs mt-0.5 mb-4" style="color: var(--color-ink-muted);">
+                Brands we identified as your category competitors from your site content.
+              </p>
+              <div class="flex flex-wrap gap-2">
+                {latestAudit.suggested_competitors.map(c => (
+                  <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+                        style="background: var(--color-surface-muted); color: var(--color-ink); border: 1px solid var(--color-border);">
+                    {c.name}
+                    {c.domain && <span style="color: var(--color-ink-subtle);">· {c.domain}</span>}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  ) : (
+    <div class="card p-8 mb-6 text-center">
+      <p class="text-sm font-medium" style="color: var(--color-ink);">
+        {audits.some(a => a.status === 'running')
+          ? 'Your first scan is running — refresh in a few minutes.'
+          : audits.some(a => a.status === 'failed')
+            ? 'Last scan failed. Try again from /admin/audits or wait for the next scheduled run.'
+            : 'No completed scan yet. Set a cadence above to start.'}
+      </p>
+    </div>
+  )}
 
   <!-- AUDITS TIMELINE ===================================================== -->
   <div class="card overflow-hidden mb-6">

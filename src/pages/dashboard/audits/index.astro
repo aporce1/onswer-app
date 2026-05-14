@@ -1,0 +1,170 @@
+---
+/**
+ * /dashboard/audits — cross-brand audit history.
+ *
+ * The user's complete audit log across every brand they own. Rows are
+ * clickable when the audit is completed (→ drill-down). Tied to the
+ * "Audits" item in the sidebar.
+ *
+ * Pagination via ?page=N. 50 per page.
+ */
+import DashboardLayout from '~/layouts/DashboardLayout.astro';
+import { requireSession } from '~/lib/auth';
+import { api } from '~/lib/api';
+
+const sessionOrResponse = await requireSession(Astro);
+if (sessionOrResponse instanceof Response) return sessionOrResponse;
+const user = sessionOrResponse;
+
+const page = Math.max(1, parseInt(Astro.url.searchParams.get('page') ?? '1', 10) || 1);
+const perPage = 50;
+
+interface AuditRow {
+  id: number;
+  brand_id: number | null;
+  brand_name: string | null;
+  domain: string;
+  kind: string;
+  status: string;
+  locale: string;
+  visibility_score: number | null;
+  mentions_count: number;
+  answers_count: number;
+  tokens_used: number;
+  cost_usd: number;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+const res = await api<{ audits: AuditRow[]; page: number; pages: number; total: number }>(
+  `/v1/audits?page=${page}&per_page=${perPage}`,
+  { cookie: Astro.request.headers.get('cookie') ?? '' }
+);
+
+const audits = res.ok ? res.data.audits : [];
+const total  = res.ok ? res.data.total  : 0;
+const pages  = res.ok ? res.data.pages  : 1;
+
+function fmtDate(ts: string | null): string {
+  if (!ts) return '—';
+  const d = new Date(ts.replace(' ', 'T') + 'Z');
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function relative(ts: string | null): string {
+  if (!ts) return '';
+  const t = new Date(ts.replace(' ', 'T') + 'Z').getTime();
+  const dt = Math.floor((Date.now() - t) / 1000);
+  if (dt < 60) return 'just now';
+  if (dt < 3600) return `${Math.floor(dt/60)} min ago`;
+  if (dt < 86400) return `${Math.floor(dt/3600)} h ago`;
+  return `${Math.floor(dt/86400)} d ago`;
+}
+
+const statusColor: Record<string, string> = {
+  completed: 'background: var(--color-ok-soft); color: var(--color-ok);',
+  running:   'background: var(--color-warn-soft); color: var(--color-warn);',
+  failed:    'background: var(--color-bad-soft); color: var(--color-bad);',
+  pending:   'background: var(--color-surface-muted); color: var(--color-ink-muted);',
+};
+---
+<DashboardLayout title="Audits" user={user} active="audits">
+
+  {audits.length === 0 ? (
+    <div class="card p-10 text-center">
+      <div class="w-14 h-14 mx-auto rounded-xl inline-flex items-center justify-center"
+           style="background: var(--color-brand-soft);">
+        <svg class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
+             style="color: var(--color-brand-hover);">
+          <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <h2 class="mt-4 text-lg font-semibold tracking-tight" style="color: var(--color-ink);">
+        No audits yet
+      </h2>
+      <p class="mt-1.5 text-sm max-w-sm mx-auto" style="color: var(--color-ink-muted);">
+        Once you add a brand and run a scan, every audit will show up here in one timeline across brands.
+      </p>
+      <a href="/dashboard/brands/new" class="btn-primary mt-5">Add a brand</a>
+    </div>
+  ) : (
+    <>
+      <p class="text-xs mb-3" style="color: var(--color-ink-muted);">
+        {total} audit{total === 1 ? '' : 's'} total · page {page} / {pages}
+      </p>
+
+      <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead style="background: var(--color-surface-muted);">
+              <tr>
+                <th class="text-left px-5 py-2.5 text-[11px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-muted);">When</th>
+                <th class="text-left px-5 py-2.5 text-[11px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-muted);">Domain</th>
+                <th class="text-left px-5 py-2.5 text-[11px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-muted);">Status</th>
+                <th class="text-right px-5 py-2.5 text-[11px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-muted);">Score</th>
+                <th class="text-right px-5 py-2.5 text-[11px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-muted);">Mentions</th>
+                <th class="text-right px-5 py-2.5 text-[11px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-muted);">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {audits.map(a => {
+                const isDone = a.status === 'completed';
+                const href = isDone ? `/dashboard/audits/${a.id}` : null;
+                return (
+                  <tr class={`transition-colors ${isDone ? 'hover:bg-[var(--color-surface-muted)] cursor-pointer' : ''}`}
+                      onclick={href ? `window.location.href='${href}'` : undefined}>
+                    <td class="px-5 py-3">
+                      <p class="text-xs font-mono" style="color: var(--color-ink);">{fmtDate(a.created_at)}</p>
+                      <p class="text-[10px]" style="color: var(--color-ink-subtle);">{relative(a.created_at)}</p>
+                    </td>
+                    <td class="px-5 py-3">
+                      <p class="text-sm font-medium" style="color: var(--color-ink);">{a.domain}</p>
+                      {a.brand_id !== null && (
+                        <a href={`/dashboard/brands/${a.brand_id}`}
+                           class="text-[11px] hover:underline" style="color: var(--color-brand-hover);"
+                           onclick="event.stopPropagation();">
+                          View brand →
+                        </a>
+                      )}
+                    </td>
+                    <td class="px-5 py-3">
+                      <span class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
+                            style={statusColor[a.status] ?? statusColor.pending}>
+                        {a.status}
+                      </span>
+                    </td>
+                    <td class="px-5 py-3 text-right font-mono tabular-nums" style="color: var(--color-ink);">
+                      {a.visibility_score === null ? '—' : `${Math.round(a.visibility_score)}%`}
+                    </td>
+                    <td class="px-5 py-3 text-right font-mono text-xs" style="color: var(--color-ink-muted);">
+                      {a.mentions_count}/{a.answers_count}
+                    </td>
+                    <td class="px-5 py-3 text-right font-mono text-xs" style="color: var(--color-ink-muted);">
+                      ${a.cost_usd.toFixed(4)}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {pages > 1 && (
+        <div class="mt-5 flex items-center gap-2">
+          {page > 1 && (
+            <a href={`/dashboard/audits?page=${page - 1}`} class="btn-secondary">← Prev</a>
+          )}
+          <span class="text-xs px-2" style="color: var(--color-ink-muted);">
+            Page {page} of {pages}
+          </span>
+          {page < pages && (
+            <a href={`/dashboard/audits?page=${page + 1}`} class="btn-secondary">Next →</a>
+          )}
+        </div>
+      )}
+    </>
+  )}
+
+</DashboardLayout>

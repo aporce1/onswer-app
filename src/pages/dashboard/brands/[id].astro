@@ -82,11 +82,24 @@ const { brand, audits, limits } = res.data;
 // per-LLM breakdown, citations, competitors, failed queries — all in one
 // page. Otherwise the user only sees a flat score + a history table and
 // has to drill into an audit row to find the actual insights.
-const latestCompleted = audits.find(a => a.status === 'completed' && a.visibility_score !== null);
+//
+// Try each completed audit from newest to oldest until one loads. The
+// per-row getAudit() call can fail for transient reasons (network blip,
+// large payload timeout, intermittent API error) and falling back to the
+// previous completed audit is much better UX than rendering an empty page.
 let latestAudit: AuditDetail | null = null;
-if (latestCompleted) {
-  const auditRes = await getAudit(Astro, latestCompleted.id);
-  if (auditRes.ok) latestAudit = auditRes.data;
+let latestAuditError: string | null = null;
+const completedAudits = audits.filter(a => a.status === 'completed' && a.visibility_score !== null);
+for (const candidate of completedAudits) {
+  const auditRes = await getAudit(Astro, candidate.id);
+  if (auditRes.ok) {
+    latestAudit = auditRes.data;
+    break;
+  }
+  // Capture the first error so we can surface it if every candidate fails.
+  if (!latestAuditError) {
+    latestAuditError = 'error' in auditRes ? auditRes.error : 'Could not load audit details';
+  }
 }
 const canUseAi = ['pro', 'agency'].includes(user.plan);
 
@@ -626,10 +639,17 @@ function flagEmoji(code: string): string {
       <p class="text-sm font-medium" style="color: var(--color-ink);">
         {audits.some(a => a.status === 'running')
           ? 'Your first scan is running — refresh in a few minutes.'
-          : audits.some(a => a.status === 'failed')
-            ? 'Last scan failed. Try again from /admin/audits or wait for the next scheduled run.'
-            : 'No completed scan yet. Set a cadence above to start.'}
+          : completedAudits.length > 0
+            ? "Couldn't load the latest scan's details."
+            : audits.some(a => a.status === 'failed')
+              ? 'Last scan failed. Try again from /admin/audits or wait for the next scheduled run.'
+              : 'No completed scan yet. Set a cadence above to start.'}
       </p>
+      {latestAuditError && (
+        <p class="text-[11px] mt-3 font-mono" style="color: var(--color-bad);">
+          Debug: {latestAuditError}
+        </p>
+      )}
     </div>
   )}
 

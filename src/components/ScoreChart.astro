@@ -1,0 +1,190 @@
+---
+/**
+ * Score-over-time chart — Plausible-inspired sparkline.
+ *
+ * Hydrates ApexCharts on the client. Data is passed via `define:vars`
+ * so the bundle doesn't ship the chart config until the script runs.
+ *
+ * Click on a data point → navigates to /dashboard/audits/{id} so users
+ * can drill into a specific snapshot. The audit IDs travel as a parallel
+ * array to the score series.
+ *
+ * Empty / single-point states are handled inline (we don't even mount
+ * ApexCharts) so first-scan brands don't get a confusing flat line.
+ */
+
+interface DataPoint {
+  /** Audit id — used as the click target */
+  id: number;
+  /** Local timestamp string from API (UTC, "YYYY-MM-DD HH:MM:SS") */
+  timestamp: string;
+  /** Visibility score 0-100, or null if the audit is still running / failed */
+  score: number | null;
+}
+
+interface Props {
+  data: DataPoint[];
+  /** Height in px. Default 280 — same as Plausible's hero chart. */
+  height?: number;
+}
+
+const { data, height = 280 } = Astro.props;
+
+// Sort ascending by time so the line reads left-to-right oldest-to-newest
+const sorted = [...data]
+  .filter(d => d.score !== null)
+  .sort((a, b) => new Date(a.timestamp.replace(' ', 'T') + 'Z').getTime()
+                - new Date(b.timestamp.replace(' ', 'T') + 'Z').getTime());
+
+const enoughDataToChart = sorted.length >= 2;
+
+// Pre-format the timestamps to UTC ms — ApexCharts wants epoch millis on
+// time-series x-axes.
+const seriesData = sorted.map(d => [
+  new Date(d.timestamp.replace(' ', 'T') + 'Z').getTime(),
+  d.score,
+]);
+const auditIds = sorted.map(d => d.id);
+
+// Headline number = most recent point. Used in the "empty" / "one point"
+// states so we still surface something useful.
+const latest = sorted[sorted.length - 1] ?? null;
+---
+
+{enoughDataToChart ? (
+  <div class="relative">
+    <div id="score-chart" style={`height: ${height}px;`}></div>
+  </div>
+) : sorted.length === 1 ? (
+  <div class="flex items-center justify-center text-center py-10" style={`min-height: ${height}px;`}>
+    <div>
+      <p class="text-5xl font-bold tabular-nums" style="color: var(--color-brand-hover);">
+        {Math.round(latest!.score!)}<span class="text-2xl" style="color: var(--color-ink-subtle);">%</span>
+      </p>
+      <p class="mt-4 text-sm" style="color: var(--color-ink-muted);">
+        You have one data point. After the next scan you'll see a trend line here.
+      </p>
+    </div>
+  </div>
+) : (
+  <div class="flex items-center justify-center text-center py-10" style={`min-height: ${height}px;`}>
+    <div>
+      <div class="w-10 h-10 mx-auto rounded-lg inline-flex items-center justify-center"
+           style="background: var(--color-surface-muted);">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+             style="color: var(--color-ink-muted);">
+          <path d="M3 3v18h18M7 14l4-4 4 4 5-5"/>
+        </svg>
+      </div>
+      <p class="mt-4 text-sm" style="color: var(--color-ink-muted);">
+        No completed scans yet. The chart will appear after your first scan finishes.
+      </p>
+    </div>
+  </div>
+)}
+
+{enoughDataToChart && (
+<script type="module" define:vars={{ seriesData, auditIds, height }}>
+  // Lazy-load ApexCharts so the dashboard's initial JS bundle stays small.
+  // Users on slower connections see the score number immediately above
+  // (rendered server-side); the chart hydrates after.
+  import('https://cdn.jsdelivr.net/npm/apexcharts@4.3.0/+esm').then(({ default: ApexCharts }) => {
+    const el = document.querySelector('#score-chart');
+    if (!el) return;
+
+    const options = {
+      chart: {
+        type: 'area',
+        height,
+        fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
+        toolbar: { show: false },
+        zoom:    { enabled: false },
+        animations: {
+          enabled: true,
+          easing: 'easeOutCubic',
+          speed: 600,
+        },
+        events: {
+          // Click a data point → drill into that audit
+          dataPointSelection: (_e, _ctx, cfg) => {
+            const idx = cfg.dataPointIndex;
+            const id = auditIds[idx];
+            if (id) window.location.href = `/dashboard/audits/${id}`;
+          },
+          markerClick: (_e, _ctx, cfg) => {
+            const idx = cfg.dataPointIndex;
+            const id = auditIds[idx];
+            if (id) window.location.href = `/dashboard/audits/${id}`;
+          },
+        },
+      },
+      series: [{ name: 'Visibility score', data: seriesData }],
+      colors: ['#6366F1'],
+      stroke: { curve: 'smooth', width: 2.5 },
+      fill: {
+        type: 'gradient',
+        gradient: {
+          shadeIntensity: 1,
+          opacityFrom: 0.35,
+          opacityTo: 0.02,
+          stops: [0, 100],
+          colorStops: [
+            { offset: 0,   color: '#6366F1', opacity: 0.35 },
+            { offset: 100, color: '#6366F1', opacity: 0.02 },
+          ],
+        },
+      },
+      dataLabels: { enabled: false },
+      grid: {
+        borderColor: '#E4E4E7',
+        strokeDashArray: 4,
+        xaxis: { lines: { show: false } },
+        yaxis: { lines: { show: true } },
+        padding: { left: 10, right: 10, top: 0, bottom: 0 },
+      },
+      xaxis: {
+        type: 'datetime',
+        labels: {
+          style: { colors: '#52525B', fontSize: '11px' },
+          datetimeFormatter: {
+            year:  'yyyy',
+            month: "MMM 'yy",
+            day:   'MMM d',
+            hour:  'HH:mm',
+          },
+        },
+        axisBorder: { show: false },
+        axisTicks:  { show: false },
+      },
+      yaxis: {
+        min: 0,
+        max: 100,
+        tickAmount: 4,
+        labels: {
+          style: { colors: '#52525B', fontSize: '11px' },
+          formatter: (v) => Math.round(v) + '%',
+        },
+      },
+      tooltip: {
+        theme: 'light',
+        x: { format: 'MMM d, HH:mm' },
+        y: { formatter: (v) => Math.round(v) + '%' },
+        marker: { show: false },
+      },
+      markers: {
+        size: 4,
+        strokeColors: '#FFFFFF',
+        strokeWidth: 2,
+        hover: { size: 7, sizeOffset: 2 },
+      },
+      states: {
+        hover:  { filter: { type: 'lighten', value: 0.04 } },
+        active: { filter: { type: 'none' } },
+      },
+    };
+
+    const chart = new ApexCharts(el, options);
+    chart.render();
+  });
+</script>
+)}

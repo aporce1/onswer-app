@@ -1,0 +1,367 @@
+---
+/**
+ * /dashboard/audits/[id] — single audit drill-down.
+ *
+ * The "what actually happened" page. Drilling down here from a chart
+ * point or the audits table answers questions like:
+ *   - Which LLMs mentioned me? Which didn't?
+ *   - What queries did I fail on? (the most valuable signal)
+ *   - Who are the competitors that beat me to the answer?
+ *   - What recommendations did we generate this time?
+ *
+ * Layout:
+ *   1. Hero: domain + score + interpretation (one card)
+ *   2. KPIs: mentions / queries / tokens / cost / duration
+ *   3. Top cited domains + suggested competitors (side by side)
+ *   4. Recommendations (grouped by priority, with effort/category chips)
+ *   5. Answers: expandable per-LLM list with response text + competitors
+ */
+import DashboardLayout from '~/layouts/DashboardLayout.astro';
+import { requireSession } from '~/lib/auth';
+import { getAudit, type AuditAnswer } from '~/lib/audits';
+import { interpretScore } from '~/lib/interpret';
+
+const sessionOrResponse = await requireSession(Astro);
+if (sessionOrResponse instanceof Response) return sessionOrResponse;
+const user = sessionOrResponse;
+
+const id = Number(Astro.params.id);
+if (!Number.isFinite(id) || id <= 0) return Astro.redirect('/dashboard/brands', 302);
+
+const res = await getAudit(Astro, id);
+if (!res.ok) return Astro.redirect('/dashboard/brands', 302);
+const audit = res.data;
+
+const scoreInterp = interpretScore(audit.visibility_score);
+const toneColor =
+  scoreInterp.tone === 'good' ? 'var(--color-ok)' :
+  scoreInterp.tone === 'bad'  ? 'var(--color-bad)' :
+  scoreInterp.tone === 'okay' ? 'var(--color-warn)' :
+  'var(--color-ink-muted)';
+
+function fmtDate(ts: string | null): string {
+  if (!ts) return '—';
+  const d = new Date(ts.replace(' ', 'T') + 'Z');
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function fmtN(n: number, d = 0): string {
+  return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+
+// Group answers per LLM so the user can see "Claude mentioned you 4/10, ChatGPT 2/10"
+const answersByLlm = new Map<string, AuditAnswer[]>();
+for (const a of audit.answers) {
+  const key = a.llm.display_name || a.llm.slug || 'Unknown';
+  if (!answersByLlm.has(key)) answersByLlm.set(key, []);
+  answersByLlm.get(key)!.push(a);
+}
+const llmBreakdown = Array.from(answersByLlm.entries()).map(([name, arr]) => {
+  const mentioned = arr.filter(a => a.brand_mentioned).length;
+  const total = arr.length;
+  return { name, mentioned, total, rate: total > 0 ? mentioned / total : 0 };
+}).sort((a, b) => b.rate - a.rate);
+
+// Failed-query insight: queries where NO LLM mentioned the brand. These
+// are the highest-leverage targets — fix one and visibility jumps.
+const queryAnswers = new Map<string, AuditAnswer[]>();
+for (const a of audit.answers) {
+  if (!queryAnswers.has(a.query_text)) queryAnswers.set(a.query_text, []);
+  queryAnswers.get(a.query_text)!.push(a);
+}
+const failedQueries = Array.from(queryAnswers.entries())
+  .filter(([, arr]) => arr.every(a => !a.brand_mentioned))
+  .slice(0, 5);
+
+// Recos: group by priority for visual hierarchy
+const recosByPriority = {
+  high:   audit.recommendations.filter(r => r.priority === 'high'),
+  medium: audit.recommendations.filter(r => r.priority === 'medium'),
+  low:    audit.recommendations.filter(r => r.priority === 'low'),
+};
+
+function parseCompetitors(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    if (Array.isArray(v)) return v.map(String).filter(Boolean).slice(0, 8);
+  } catch { /* not JSON */ }
+  return [];
+}
+---
+<DashboardLayout title={`Audit · ${audit.domain}`} user={user} active="brands">
+
+  <Fragment slot="header-actions">
+    <a href={`/dashboard/brands`} class="btn-secondary">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 12H5M12 19l-7-7 7-7"/>
+      </svg>
+      All brands
+    </a>
+    <a href={`https://api.onswer.app/v1/audits/${audit.id}/export.csv`}
+       class="btn-secondary ml-2" target="_blank" rel="noreferrer">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v14M5 10l7 7 7-7M5 21h14"/>
+      </svg>
+      Export CSV
+    </a>
+  </Fragment>
+
+  <!-- HERO with score + interpretation =================================== -->
+  <div class="card p-7 mb-6">
+    <div class="flex items-start justify-between gap-6 flex-wrap">
+      <div class="min-w-0">
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">
+          Audit #{audit.id} · {fmtDate(audit.completed_at ?? audit.started_at)}
+        </p>
+        <h2 class="mt-1 text-2xl font-bold tracking-tight" style="color: var(--color-ink);">{audit.domain}</h2>
+        <p class="mt-1 text-sm" style="color: var(--color-ink-muted);">
+          {fmtN(audit.queries_count)} queries · {fmtN(audit.llms_count)} LLMs · {fmtN(audit.geos_count)} geo{audit.geos_count === 1 ? '' : 's'}
+        </p>
+      </div>
+      <div class="text-right">
+        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Visibility</p>
+        <p class="mt-1 text-5xl font-bold tabular-nums" style={`color: ${toneColor};`}>
+          {audit.visibility_score === null ? '—' : Math.round(audit.visibility_score)}
+          {audit.visibility_score !== null && <span class="text-2xl font-medium" style="color: var(--color-ink-subtle);">%</span>}
+        </p>
+      </div>
+    </div>
+
+    <div class="mt-5 pt-5 border-t" style="border-color: var(--color-border);">
+      <p class="text-sm font-medium leading-relaxed" style={`color: ${toneColor};`}>
+        {scoreInterp.headline}
+      </p>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="mt-6 pt-5 border-t grid grid-cols-2 sm:grid-cols-5 gap-4"
+         style="border-color: var(--color-border);">
+      <div>
+        <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Mentions</p>
+        <p class="mt-1 text-sm font-mono tabular-nums" style="color: var(--color-ink);">
+          {audit.mentions_count} <span style="color: var(--color-ink-subtle);">/ {audit.answers_count}</span>
+        </p>
+      </div>
+      <div>
+        <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Tokens</p>
+        <p class="mt-1 text-sm font-mono tabular-nums" style="color: var(--color-ink);">{fmtN(audit.tokens_used)}</p>
+      </div>
+      <div>
+        <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Cost</p>
+        <p class="mt-1 text-sm font-mono tabular-nums" style="color: var(--color-ink);">${fmtN(audit.cost_usd, 4)}</p>
+      </div>
+      <div>
+        <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Started</p>
+        <p class="mt-1 text-xs font-mono" style="color: var(--color-ink);">{fmtDate(audit.started_at)}</p>
+      </div>
+      <div>
+        <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Completed</p>
+        <p class="mt-1 text-xs font-mono" style="color: var(--color-ink);">{fmtDate(audit.completed_at)}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- PER-LLM BREAKDOWN ================================================== -->
+  <div class="card p-6 mb-6">
+    <h3 class="text-sm font-semibold" style="color: var(--color-ink);">By model</h3>
+    <p class="text-xs mt-0.5 mb-5" style="color: var(--color-ink-muted);">
+      Which LLMs mention you most often. Use this to see where you have ground to cover.
+    </p>
+
+    <div class="space-y-4">
+      {llmBreakdown.map(l => (
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <p class="text-sm font-medium" style="color: var(--color-ink);">{l.name}</p>
+            <p class="text-xs font-mono tabular-nums" style="color: var(--color-ink-muted);">
+              {l.mentioned} / {l.total} · <span style={`color: ${l.rate >= 0.6 ? 'var(--color-ok)' : l.rate >= 0.3 ? 'var(--color-warn)' : 'var(--color-bad)'};`}>{Math.round(l.rate * 100)}%</span>
+            </p>
+          </div>
+          <div class="w-full h-1.5 rounded-full overflow-hidden" style="background: var(--color-surface-muted);">
+            <div class="h-full rounded-full transition-all duration-700"
+                 style={`width: ${l.rate * 100}%; background: ${l.rate >= 0.6 ? 'var(--color-ok)' : l.rate >= 0.3 ? 'var(--color-warn)' : 'var(--color-bad)'};`}></div>
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+
+  <!-- TWO-COL: TOP CITED + COMPETITORS =================================== -->
+  {(audit.top_cited_domains.length > 0 || audit.suggested_competitors.length > 0) && (
+    <div class="grid lg:grid-cols-2 gap-6 mb-6">
+
+      {audit.top_cited_domains.length > 0 && (
+        <div class="card p-6">
+          <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Top cited sources</h3>
+          <p class="text-xs mt-0.5 mb-4" style="color: var(--color-ink-muted);">
+            Which sources LLMs trust most when answering buyer queries in your category.
+            These are where you want to be linked from.
+          </p>
+          <div class="space-y-1.5">
+            {audit.top_cited_domains.map((c, i) => (
+              <div class="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-[var(--color-surface-muted)]">
+                <div class="flex items-center gap-3 min-w-0">
+                  <span class="text-xs font-mono w-5 text-right" style="color: var(--color-ink-subtle);">#{i + 1}</span>
+                  <span class="text-sm font-medium truncate" style="color: var(--color-ink);">{c.domain}</span>
+                </div>
+                <span class="text-xs font-mono tabular-nums shrink-0" style="color: var(--color-ink-muted);">{c.n} cite{c.n === 1 ? '' : 's'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {audit.suggested_competitors.length > 0 && (
+        <div class="card p-6">
+          <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Auto-detected competitors</h3>
+          <p class="text-xs mt-0.5 mb-4" style="color: var(--color-ink-muted);">
+            From your site content, we identified these brands as your category competitors. Track them in queries.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            {audit.suggested_competitors.map(c => (
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+                    style="background: var(--color-surface-muted); color: var(--color-ink); border: 1px solid var(--color-border);">
+                {c.name}
+                {c.domain && <span style="color: var(--color-ink-subtle);">· {c.domain}</span>}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )}
+
+  <!-- RECOMMENDATIONS ==================================================== -->
+  {audit.recommendations.length > 0 && (
+    <div class="mb-6">
+      <h3 class="text-base font-semibold mb-1" style="color: var(--color-ink);">Recommendations</h3>
+      <p class="text-xs mb-4" style="color: var(--color-ink-muted);">
+        Specific, prioritised actions to improve your visibility. Start with high-priority items.
+      </p>
+
+      {(['high', 'medium', 'low'] as const).map(priority => {
+        const items = recosByPriority[priority];
+        if (items.length === 0) return null;
+        const chip = priority === 'high' ? 'bg-[var(--color-bad-soft)] text-[var(--color-bad)]'
+                  : priority === 'medium' ? 'bg-[var(--color-warn-soft)] text-[var(--color-warn)]'
+                  : 'bg-[var(--color-surface-muted)] text-[var(--color-ink-muted)]';
+        return (
+          <div class="mb-5">
+            <div class="flex items-center gap-2 mb-3">
+              <span class={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full ${chip}`}>
+                {priority} priority
+              </span>
+              <span class="text-xs" style="color: var(--color-ink-subtle);">{items.length} item{items.length === 1 ? '' : 's'}</span>
+            </div>
+            <div class="grid sm:grid-cols-2 gap-3">
+              {items.map(r => (
+                <div class="card p-5">
+                  <div class="flex items-center justify-between text-[10px] uppercase tracking-wider mb-2">
+                    <span style="color: var(--color-ink-subtle);">{r.category}</span>
+                    <span class="px-2 py-0.5 rounded-full font-semibold"
+                          style="background: var(--color-surface-muted); color: var(--color-ink-muted);">
+                      {r.effort} effort
+                    </span>
+                  </div>
+                  <p class="text-sm font-semibold leading-snug" style="color: var(--color-ink);">{r.title}</p>
+                  <p class="mt-1.5 text-xs leading-relaxed" style="color: var(--color-ink-muted);">{r.description}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  )}
+
+  <!-- FAILED QUERIES INSIGHT ============================================= -->
+  {failedQueries.length > 0 && (
+    <div class="card p-6 mb-6"
+         style="border-left: 3px solid var(--color-warn);">
+      <div class="flex items-start gap-3">
+        <div class="w-8 h-8 rounded-lg shrink-0 inline-flex items-center justify-center"
+             style="background: var(--color-warn-soft); color: var(--color-warn);">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01"/>
+          </svg>
+        </div>
+        <div class="flex-1">
+          <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Queries where NO LLM mentioned you</h3>
+          <p class="text-xs mt-1 leading-relaxed" style="color: var(--color-ink-muted);">
+            These are your biggest wins — fix any of these and your visibility jumps. Each one is a content gap.
+          </p>
+          <ul class="mt-3 space-y-2">
+            {failedQueries.map(([q]) => (
+              <li class="text-sm font-medium px-3 py-2 rounded-lg"
+                  style="background: var(--color-surface-muted); color: var(--color-ink);">
+                "{q}"
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  )}
+
+  <!-- ANSWERS (expandable) =============================================== -->
+  <div class="card overflow-hidden mb-6">
+    <div class="px-6 py-4 border-b" style="border-color: var(--color-border);">
+      <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Every answer ({audit.answers.length})</h3>
+      <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
+        The full response each LLM gave to each query. Expand a row to see the verbatim text.
+      </p>
+    </div>
+    <div class="divide-y" style="border-color: var(--color-border);">
+      {audit.answers.map((a, i) => {
+        const competitors = parseCompetitors(a.competitors_seen);
+        return (
+          <details class="group">
+            <summary class="px-6 py-4 cursor-pointer hover:bg-[var(--color-surface-muted)] flex items-start justify-between gap-4 select-none">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2.5 text-xs mb-1.5">
+                  <span class="font-mono" style="color: var(--color-ink-subtle);">#{i + 1}</span>
+                  <span class="font-medium" style="color: var(--color-ink);">{a.llm.display_name || a.llm.slug}</span>
+                  {a.brand_mentioned ? (
+                    <span class="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full"
+                          style="background: var(--color-ok-soft); color: var(--color-ok);">
+                      ✓ Mentioned{a.mention_position !== null && ` · #${a.mention_position}`}
+                    </span>
+                  ) : (
+                    <span class="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full"
+                          style="background: var(--color-surface-muted); color: var(--color-ink-muted);">
+                      Not mentioned
+                    </span>
+                  )}
+                </div>
+                <p class="text-sm font-medium leading-snug truncate" style="color: var(--color-ink);">{a.query_text}</p>
+              </div>
+              <div class="text-right shrink-0 text-[11px] font-mono" style="color: var(--color-ink-subtle);">
+                <p>{fmtN(a.tokens_used)} tok</p>
+                <p>${a.cost_usd.toFixed(5)}</p>
+              </div>
+            </summary>
+            <div class="px-6 pb-5 -mt-1">
+              {a.error ? (
+                <p class="text-xs font-mono p-3 rounded-lg"
+                   style="background: var(--color-bad-soft); color: var(--color-bad);">{a.error}</p>
+              ) : (
+                <pre class="text-xs leading-relaxed p-4 rounded-lg whitespace-pre-wrap font-mono overflow-x-auto"
+                     style="background: var(--color-surface-muted); color: var(--color-ink); border: 1px solid var(--color-border); max-height: 320px; overflow-y: auto;">{a.response_text}</pre>
+              )}
+              {competitors.length > 0 && (
+                <div class="mt-3 flex flex-wrap items-center gap-1.5">
+                  <span class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Competitors mentioned:</span>
+                  {competitors.map(c => (
+                    <span class="text-[11px] font-mono px-2 py-0.5 rounded"
+                          style="background: var(--color-surface-muted); color: var(--color-ink-muted); border: 1px solid var(--color-border);">{c}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </details>
+        );
+      })}
+    </div>
+  </div>
+
+</DashboardLayout>

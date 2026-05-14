@@ -13,6 +13,7 @@
  * for state mutations.
  */
 import DashboardLayout from '~/layouts/DashboardLayout.astro';
+import ScoreChart from '~/components/ScoreChart.astro';
 import { requireSession } from '~/lib/auth';
 import {
   getBrand, updateBrandSchedule, deleteBrand,
@@ -223,6 +224,23 @@ const toneColor =
     </div>
   </div>
 
+  <!-- SCORE-OVER-TIME CHART =============================================== -->
+  <div class="card p-6 mb-6">
+    <div class="flex items-start justify-between gap-4 flex-wrap mb-4">
+      <div>
+        <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Score over time</h3>
+        <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
+          Each point is a scan. Click a point to drill into that audit's results.
+        </p>
+      </div>
+    </div>
+    <ScoreChart data={audits.map(a => ({
+      id: a.id,
+      timestamp: a.completed_at ?? a.created_at,
+      score: a.visibility_score,
+    }))} height={300} />
+  </div>
+
   <!-- AUDITS TIMELINE ===================================================== -->
   <div class="card overflow-hidden mb-6">
     <div class="px-6 py-4 border-b flex items-center justify-between"
@@ -230,7 +248,7 @@ const toneColor =
       <div>
         <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Audit history</h3>
         <p class="text-xs mt-0.5" style="color: var(--color-ink-muted);">
-          Score over time. Sprint 3 adds a chart here.
+          Every scan we've run for this brand.
         </p>
       </div>
     </div>
@@ -254,33 +272,38 @@ const toneColor =
             </tr>
           </thead>
           <tbody>
-            {audits.map(a => (
-              <tr class="hover:bg-[var(--color-surface-muted)] transition-colors">
-                <td class="px-6 py-3 font-mono text-xs" style="color: var(--color-ink-muted);">
-                  {fmtDate(a.created_at)}
-                </td>
-                <td class="px-6 py-3">
-                  <span class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
-                        style={
-                          a.status === 'completed' ? 'background: var(--color-ok-soft); color: var(--color-ok);' :
-                          a.status === 'failed'    ? 'background: var(--color-bad-soft); color: var(--color-bad);' :
-                          a.status === 'running'   ? 'background: var(--color-warn-soft); color: var(--color-warn);' :
-                          'background: var(--color-surface-muted); color: var(--color-ink-muted);'
-                        }>
-                    {a.status}
-                  </span>
-                </td>
-                <td class="px-6 py-3 text-right font-mono tabular-nums" style="color: var(--color-ink);">
-                  {a.visibility_score === null ? '—' : `${Math.round(a.visibility_score)}%`}
-                </td>
-                <td class="px-6 py-3 text-right font-mono text-xs" style="color: var(--color-ink-muted);">
-                  {a.mentions_count}/{a.answers_count}
-                </td>
-                <td class="px-6 py-3 text-right font-mono text-xs" style="color: var(--color-ink-muted);">
-                  ${a.cost_usd.toFixed(4)}
-                </td>
-              </tr>
-            ))}
+            {audits.map(a => {
+              const isDone = a.status === 'completed';
+              const href = isDone ? `/dashboard/audits/${a.id}` : null;
+              return (
+                <tr class={`transition-colors ${isDone ? 'hover:bg-[var(--color-surface-muted)] cursor-pointer' : ''}`}
+                    onclick={href ? `window.location.href='${href}'` : undefined}>
+                  <td class="px-6 py-3 font-mono text-xs" style="color: var(--color-ink-muted);">
+                    {fmtDate(a.created_at)}
+                  </td>
+                  <td class="px-6 py-3">
+                    <span class="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
+                          style={
+                            a.status === 'completed' ? 'background: var(--color-ok-soft); color: var(--color-ok);' :
+                            a.status === 'failed'    ? 'background: var(--color-bad-soft); color: var(--color-bad);' :
+                            a.status === 'running'   ? 'background: var(--color-warn-soft); color: var(--color-warn);' :
+                            'background: var(--color-surface-muted); color: var(--color-ink-muted);'
+                          }>
+                      {a.status}
+                    </span>
+                  </td>
+                  <td class="px-6 py-3 text-right font-mono tabular-nums" style="color: var(--color-ink);">
+                    {a.visibility_score === null ? '—' : `${Math.round(a.visibility_score)}%`}
+                  </td>
+                  <td class="px-6 py-3 text-right font-mono text-xs" style="color: var(--color-ink-muted);">
+                    {a.mentions_count}/{a.answers_count}
+                  </td>
+                  <td class="px-6 py-3 text-right font-mono text-xs" style="color: var(--color-ink-muted);">
+                    ${a.cost_usd.toFixed(4)}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

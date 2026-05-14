@@ -12,8 +12,25 @@ interface Props {
   user: SessionUser;
   /** Which sidebar item is active. */
   active?: 'overview' | 'brands' | 'audits' | 'settings';
+  /**
+   * Layout width:
+   *  - 'wide'     → content fills the whole main column (data-heavy pages
+   *                  like brand detail + brand list — more breathing room
+   *                  for tables and KPI rows)
+   *  - 'centered' → max-w-2xl centered (focused forms like /new, settings)
+   *  - 'hero'     → max-w-3xl centered + vertical centering (welcome state,
+   *                  empty states — feels like a destination, not a page)
+   */
+  width?: 'wide' | 'centered' | 'hero';
 }
-const { title, user, active = 'overview' } = Astro.props;
+const { title, user, active = 'overview', width = 'wide' } = Astro.props;
+
+const containerClasses =
+  width === 'hero'
+    ? 'px-8 py-12 max-w-3xl mx-auto min-h-[calc(100vh-72px)] flex items-center'
+    : width === 'centered'
+      ? 'px-8 py-8 max-w-2xl mx-auto'
+      : 'px-8 py-8 w-full';
 ---
 <!doctype html>
 <html lang={user.locale || 'en'}>
@@ -42,8 +59,10 @@ const { title, user, active = 'overview' } = Astro.props;
         </div>
       </header>
 
-      <div class="px-8 py-8 max-w-6xl">
-        <slot />
+      <div class={containerClasses}>
+        <div class="w-full">
+          <slot />
+        </div>
       </div>
     </main>
   </div>

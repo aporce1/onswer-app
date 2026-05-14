@@ -54,13 +54,13 @@ const cadenceOptions: { value: ScanFrequency; label: string; tier: string }[] = 
 const planRank: Record<string, number> = { free: 0, solo: 1, pro: 2, agency: 2 };
 const userRank = planRank[user.plan] ?? 0;
 ---
-<DashboardLayout title="Add brand" user={user} active="brands">
+<DashboardLayout title="Add brand" user={user} active="brands" width="centered">
 
   <Fragment slot="header-actions">
     <a href="/dashboard/brands" class="btn-secondary">Cancel</a>
   </Fragment>
 
-  <form method="POST" class="card p-7 max-w-2xl">
+  <form method="POST" class="card p-7">
 
     {errorMsg && (
       <div class="rounded-lg p-3 mb-5 text-sm"

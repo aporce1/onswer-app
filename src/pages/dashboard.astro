@@ -4,11 +4,8 @@
  *
  * If the user has brands, redirect straight to /dashboard/brands so they
  * land where the action is. If empty, render the welcome / first-brand
- * empty state with the 3-step inline tutorial.
- *
- * Why redirect rather than render the brand list here too: keeps "view
- * brands" as one canonical URL the user can bookmark. The empty state
- * is its own thing — once you have a brand you never see it again.
+ * empty state — vertically centered, generous spacing, designed to feel
+ * like a destination instead of a placeholder.
  */
 import DashboardLayout from '~/layouts/DashboardLayout.astro';
 import { requireSession } from '~/lib/auth';
@@ -23,61 +20,102 @@ const brands = res.ok ? res.data.brands : [];
 if (brands.length > 0) {
   return Astro.redirect('/dashboard/brands', 302);
 }
----
-<DashboardLayout title="Welcome" user={user} active="overview">
 
-  <div class="card p-10 text-center">
-    <div class="w-16 h-16 mx-auto rounded-2xl inline-flex items-center justify-center"
-         style="background: var(--color-brand-soft);">
-      <svg class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-           style="color: var(--color-brand-hover);">
-        <path d="M3 7l9 5 9-5M3 7v10l9 5 9-5V7M3 7l9-5 9 5"/>
-      </svg>
+const firstName = user.email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+---
+<DashboardLayout title="Welcome" user={user} active="overview" width="hero">
+
+  <!-- Soft halo behind the hero so the white card has something to sit on.
+       Subtle enough not to compete with the content. -->
+  <div class="relative w-full">
+    <div class="absolute inset-x-0 -top-10 -bottom-10 -z-10 pointer-events-none"
+         style="background:
+           radial-gradient(700px 350px at 50% 0%, rgba(99, 102, 241, 0.08), transparent 60%),
+           radial-gradient(500px 280px at 80% 100%, rgba(168, 85, 247, 0.06), transparent 60%);">
     </div>
 
-    <h2 class="mt-5 text-2xl font-semibold tracking-tight" style="color: var(--color-ink);">
-      Welcome to Onswer, {user.email.split('@')[0]}
-    </h2>
-    <p class="mt-2 text-sm max-w-md mx-auto leading-relaxed" style="color: var(--color-ink-muted);">
-      Add a brand to start tracking how often LLMs mention it when buyers ask
-      category questions. We'll re-scan it on your cadence and email you when
-      your visibility shifts.
-    </p>
+    <div class="text-center w-full">
 
-    <a href="/dashboard/brands/new" class="btn-primary mt-7">
-      Add your first brand
-      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M5 12h14M13 5l7 7-7 7"/>
-      </svg>
-    </a>
-
-    <div class="mt-12 grid sm:grid-cols-3 gap-4 max-w-3xl mx-auto text-left">
-      <div class="rounded-xl p-4" style="background: var(--color-surface-muted); border: 1px solid var(--color-border);">
-        <div class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-semibold mb-3"
-             style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink);">1</div>
-        <p class="text-sm font-medium" style="color: var(--color-ink);">Add your domain</p>
-        <p class="text-xs mt-1 leading-relaxed" style="color: var(--color-ink-muted);">
-          We auto-detect competitors and category from your site.
-        </p>
+      <!-- Animated brand orb -->
+      <div class="inline-block">
+        <span class="relative inline-flex items-center justify-center w-20 h-20 rounded-3xl"
+              style="background: linear-gradient(135deg, #EEF2FF 0%, #FAF5FF 100%); border: 1px solid var(--color-brand-line);">
+          <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" class="w-12 h-12">
+            <defs>
+              <linearGradient id="welcome-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%"   stop-color="#4F46E5"/>
+                <stop offset="50%"  stop-color="#7C3AED"/>
+                <stop offset="100%" stop-color="#06B6D4"/>
+              </linearGradient>
+            </defs>
+            <circle cx="32" cy="32" r="20" fill="none" stroke="url(#welcome-grad)" stroke-width="3.5" stroke-linecap="round"/>
+            <circle cx="32" cy="32" r="6" fill="url(#welcome-grad)"/>
+          </svg>
+        </span>
       </div>
 
-      <div class="rounded-xl p-4" style="background: var(--color-surface-muted); border: 1px solid var(--color-border);">
-        <div class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-semibold mb-3"
-             style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink);">2</div>
-        <p class="text-sm font-medium" style="color: var(--color-ink);">Pick a cadence</p>
-        <p class="text-xs mt-1 leading-relaxed" style="color: var(--color-ink-muted);">
-          Daily for Pro, weekly for Solo. Switch any time.
-        </p>
+      <!-- Headline -->
+      <h2 class="mt-7 text-3xl sm:text-4xl font-semibold tracking-tight" style="color: var(--color-ink);">
+        Welcome, {firstName}
+      </h2>
+      <p class="mt-3 text-base max-w-lg mx-auto leading-relaxed" style="color: var(--color-ink-muted);">
+        Onswer tracks how often Claude, ChatGPT, Gemini and Perplexity mention
+        your brand when buyers ask category questions. Add your domain to start.
+      </p>
+
+      <!-- Primary CTA -->
+      <a href="/dashboard/brands/new"
+         class="btn-primary mt-8 px-5 py-2.5"
+         style="font-size: 0.9375rem;">
+        Add your first brand
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14M13 5l7 7-7 7"/>
+        </svg>
+      </a>
+
+      <!-- 3-step inline tutorial — auto-explanatory, no overlay tour needed -->
+      <div class="mt-14 grid sm:grid-cols-3 gap-4 text-left">
+        <div class="card p-5 transition-shadow hover:shadow-sm">
+          <div class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-xs font-bold mb-3"
+               style="background: var(--color-brand-soft); color: var(--color-brand-hover);">1</div>
+          <p class="text-sm font-semibold" style="color: var(--color-ink);">Add your domain</p>
+          <p class="text-xs mt-1.5 leading-relaxed" style="color: var(--color-ink-muted);">
+            We auto-detect your category, competitors, and the buyer queries that matter.
+          </p>
+        </div>
+
+        <div class="card p-5 transition-shadow hover:shadow-sm">
+          <div class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-xs font-bold mb-3"
+               style="background: var(--color-brand-soft); color: var(--color-brand-hover);">2</div>
+          <p class="text-sm font-semibold" style="color: var(--color-ink);">Pick a cadence</p>
+          <p class="text-xs mt-1.5 leading-relaxed" style="color: var(--color-ink-muted);">
+            Daily on Pro · weekly on Solo. Switch anytime, pause anytime.
+          </p>
+        </div>
+
+        <div class="card p-5 transition-shadow hover:shadow-sm">
+          <div class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-xs font-bold mb-3"
+               style="background: var(--color-brand-soft); color: var(--color-brand-hover);">3</div>
+          <p class="text-sm font-semibold" style="color: var(--color-ink);">Watch your score evolve</p>
+          <p class="text-xs mt-1.5 leading-relaxed" style="color: var(--color-ink-muted);">
+            Track changes over time, get alerted when visibility drops, act on the recommendations.
+          </p>
+        </div>
       </div>
 
-      <div class="rounded-xl p-4" style="background: var(--color-surface-muted); border: 1px solid var(--color-border);">
-        <div class="inline-flex items-center justify-center w-7 h-7 rounded-lg text-xs font-semibold mb-3"
-             style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink);">3</div>
-        <p class="text-sm font-medium" style="color: var(--color-ink);">Watch your score evolve</p>
-        <p class="text-xs mt-1 leading-relaxed" style="color: var(--color-ink-muted);">
-          Track score changes over time and act on recommendations.
+      <!-- Subtle footnote — sets expectation about first scan time -->
+      {user.plan !== 'free' && (
+        <p class="mt-10 text-xs" style="color: var(--color-ink-subtle);">
+          Your first scan runs immediately and lands in ~90 seconds.
         </p>
-      </div>
+      )}
+      {user.plan === 'free' && (
+        <p class="mt-10 text-xs" style="color: var(--color-ink-subtle);">
+          You're on the Free plan — we'll save your brand but won't scan it automatically.
+          <a href="https://onswer.app/#pricing" target="_blank" rel="noreferrer"
+             class="font-semibold underline ml-1" style="color: var(--color-brand-hover);">See plans</a>
+        </p>
+      )}
     </div>
   </div>
 

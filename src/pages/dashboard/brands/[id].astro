@@ -125,89 +125,102 @@ const toneColor =
     </div>
   )}
 
-  <!-- HEADER ============================================================== -->
-  <div class="card p-7 mb-6">
-    <div class="flex items-start justify-between gap-6 flex-wrap">
-      <div>
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">
-          Brand
+  <!-- TWO-COLUMN LAYOUT on wide screens: left = main metrics, right = controls -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+
+    <!-- LEFT (2/3): HEADER WITH SCORE + INTERPRETATION ===================== -->
+    <div class="lg:col-span-2 card p-7">
+      <div class="flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">
+            Brand
+          </p>
+          <h2 class="mt-1 text-2xl font-bold tracking-tight" style="color: var(--color-ink);">{brand.domain}</h2>
+          {brand.industry && (
+            <p class="mt-1 text-sm" style="color: var(--color-ink-muted);">{brand.industry}</p>
+          )}
+        </div>
+
+        <div class="text-right">
+          <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">
+            Visibility score
+          </p>
+          <p class="mt-1 text-5xl font-bold tabular-nums" style={`color: ${toneColor};`}>
+            {latestScore === null ? '—' : Math.round(latestScore)}
+            {latestScore !== null && <span class="text-2xl font-medium" style="color: var(--color-ink-subtle);">%</span>}
+          </p>
+        </div>
+      </div>
+
+      <!-- Interpretation under the score — the whole point of the page -->
+      <div class="mt-5 pt-5 border-t" style="border-color: var(--color-border);">
+        <p class="text-sm font-medium leading-relaxed" style={`color: ${toneColor};`}>
+          {scoreInterp.headline}
         </p>
-        <h2 class="mt-1 text-2xl font-bold tracking-tight" style="color: var(--color-ink);">{brand.domain}</h2>
-        {brand.industry && (
-          <p class="mt-1 text-sm" style="color: var(--color-ink-muted);">{brand.industry}</p>
+        {deltaInterp && (
+          <p class="mt-2 text-sm" style="color: var(--color-ink-muted);">
+            {deltaInterp.headline}
+          </p>
         )}
       </div>
 
-      <div class="text-right">
-        <p class="text-xs uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">
-          Visibility score
-        </p>
-        <p class="mt-1 text-5xl font-bold tabular-nums" style={`color: ${toneColor};`}>
-          {latestScore === null ? '—' : Math.round(latestScore)}
-          {latestScore !== null && <span class="text-2xl font-medium" style="color: var(--color-ink-subtle);">%</span>}
-        </p>
+      <!-- KPI strip inside the same card so the right column can be taller -->
+      <div class="mt-6 pt-5 border-t grid grid-cols-2 sm:grid-cols-4 gap-4"
+           style="border-color: var(--color-border);">
+        <div>
+          <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Last scan</p>
+          <p class="mt-1 text-sm font-medium" style="color: var(--color-ink);">{fmtDate(brand.last_scan_at)}</p>
+        </div>
+        <div>
+          <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Next scan</p>
+          <p class="mt-1 text-sm font-medium" style="color: var(--color-ink);">{fmtDate(brand.next_scan_at)}</p>
+        </div>
+        <div>
+          <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Total audits</p>
+          <p class="mt-1 text-sm font-medium" style="color: var(--color-ink);">{audits.length}</p>
+        </div>
+        <div>
+          <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Cadence</p>
+          <p class="mt-1 text-sm font-medium" style="color: var(--color-ink);">{frequencyLabels[brand.scan_frequency]}</p>
+        </div>
       </div>
     </div>
 
-    <!-- Interpretation under the score — the whole point of the page -->
-    <div class="mt-5 pt-5 border-t" style="border-color: var(--color-border);">
-      <p class="text-sm font-medium leading-relaxed" style={`color: ${toneColor};`}>
-        {scoreInterp.headline}
-      </p>
-      {deltaInterp && (
-        <p class="mt-2 text-sm" style="color: var(--color-ink-muted);">
-          {deltaInterp.headline}
-        </p>
-      )}
-    </div>
-  </div>
+    <!-- RIGHT (1/3): CADENCE CONTROL ====================================== -->
+    <div class="card p-6">
+      <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Scan cadence</h3>
+      <p class="mt-1 text-xs leading-relaxed" style="color: var(--color-ink-muted);">{cadenceText}</p>
 
-  <!-- KPI ROW ============================================================= -->
-  <div class="grid sm:grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-    <div class="card-flat p-4">
-      <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Last scan</p>
-      <p class="mt-1 text-sm font-medium" style="color: var(--color-ink);">{fmtDate(brand.last_scan_at)}</p>
+      <form method="POST" class="mt-4 space-y-2">
+        <input type="hidden" name="action" value="schedule" />
+        {cadenceOptions.map(opt => {
+          const optRank = planRank[opt.tier];
+          const locked = optRank > userRank;
+          const selected = brand.scan_frequency === opt.value;
+          return (
+            <button type="submit" name="scan_frequency" value={opt.value}
+                    disabled={locked}
+                    class={`w-full px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left flex items-center justify-between gap-2 ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    style={selected
+                      ? 'background: var(--color-brand-soft); border: 1.5px solid var(--color-brand); color: var(--color-brand-hover);'
+                      : 'background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink);'}>
+              <span>{opt.label}</span>
+              {locked && (
+                <span class="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded"
+                      style="background: var(--color-surface-muted); color: var(--color-ink-muted);">
+                  {opt.tier === 'solo' ? 'Solo+' : 'Pro+'}
+                </span>
+              )}
+              {selected && !locked && (
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M5 13l4 4L19 7"/>
+                </svg>
+              )}
+            </button>
+          );
+        })}
+      </form>
     </div>
-    <div class="card-flat p-4">
-      <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Next scan</p>
-      <p class="mt-1 text-sm font-medium" style="color: var(--color-ink);">{fmtDate(brand.next_scan_at)}</p>
-    </div>
-    <div class="card-flat p-4">
-      <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Total audits</p>
-      <p class="mt-1 text-sm font-medium" style="color: var(--color-ink);">{audits.length}</p>
-    </div>
-    <div class="card-flat p-4">
-      <p class="text-[10px] uppercase tracking-wider font-semibold" style="color: var(--color-ink-subtle);">Cadence</p>
-      <p class="mt-1 text-sm font-medium" style="color: var(--color-ink);">{frequencyLabels[brand.scan_frequency]}</p>
-    </div>
-  </div>
-
-  <!-- CADENCE CONTROL ===================================================== -->
-  <div class="card p-6 mb-6">
-    <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Scan cadence</h3>
-    <p class="mt-1 text-sm" style="color: var(--color-ink-muted);">{cadenceText}</p>
-
-    <form method="POST" class="mt-4 grid sm:grid-cols-4 gap-2">
-      <input type="hidden" name="action" value="schedule" />
-      {cadenceOptions.map(opt => {
-        const optRank = planRank[opt.tier];
-        const locked = optRank > userRank;
-        const selected = brand.scan_frequency === opt.value;
-        return (
-          <button type="submit" name="scan_frequency" value={opt.value}
-                  disabled={locked}
-                  class={`px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  style={selected
-                    ? 'background: var(--color-brand-soft); border: 1.5px solid var(--color-brand); color: var(--color-brand-hover);'
-                    : 'background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-ink);'}>
-            <span class="block text-[11px] uppercase tracking-wider" style={selected ? 'color: var(--color-brand);' : 'color: var(--color-ink-muted);'}>
-              {locked ? (opt.tier === 'solo' ? 'Solo+' : 'Pro+') : ' '}
-            </span>
-            <span class="block">{opt.label}</span>
-          </button>
-        );
-      })}
-    </form>
   </div>
 
   <!-- AUDITS TIMELINE ===================================================== -->

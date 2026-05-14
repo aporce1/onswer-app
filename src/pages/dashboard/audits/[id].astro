@@ -47,9 +47,54 @@ if (Astro.request.method === 'POST') {
 }
 
 const res = await getAudit(Astro, id);
-if (!res.ok) return Astro.redirect('/dashboard/brands', 302);
-const audit = res.data;
+const auditOrNull = res.ok ? res.data : null;
+const loadError = res.ok ? null : ('error' in res ? res.error : 'Unknown error');
 const canUseAi = ['pro', 'agency'].includes(user.plan);
+
+// Early-render the error page if the API didn't give us the audit. Done
+// via Astro's pattern of conditional response: when auditOrNull is missing
+// we render a tiny standalone page and skip the heavy data computation.
+if (!auditOrNull) {
+  return new Response(`<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Audit not available — Onswer</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="preconnect" href="https://rsms.me/"><link rel="stylesheet" href="https://rsms.me/inter/inter.css">
+<style>
+  body{margin:0;font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:#FAFAFA;color:#18181B;
+       min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}
+  .card{max-width:480px;background:#fff;border:1px solid #E4E4E7;border-radius:14px;padding:32px;text-align:center;}
+  h1{margin:8px 0 4px;font-size:18px;font-weight:600;letter-spacing:-0.01em;}
+  p{margin:0;color:#52525B;font-size:14px;line-height:1.55;}
+  pre{margin:16px 0;padding:8px 12px;background:#FEE2E2;color:#B91C1C;border-radius:6px;
+      font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;display:inline-block;}
+  a{display:inline-block;margin-top:18px;padding:8px 16px;background:#fff;border:1px solid #D4D4D8;
+    border-radius:8px;color:#18181B;text-decoration:none;font-size:13px;font-weight:500;}
+  a:hover{background:#F4F4F5;}
+  .icon{display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;
+        border-radius:12px;background:#FEE2E2;color:#B91C1C;margin-bottom:6px;}
+</style></head>
+<body>
+<div class="card">
+  <span class="icon">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 9v4M12 17h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+  </span>
+  <h1>Couldn't load this audit</h1>
+  <p>Audit #${id} exists but our fetch to the API failed.</p>
+  <pre>Debug: ${loadError ? loadError.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] ?? c)) : 'unknown'}</pre>
+  <p style="font-size:12px;color:#A1A1AA;">Share this with support and we'll dig in.</p>
+  <a href="/dashboard/brands">← Back to brands</a>
+</div>
+</body></html>`, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
+// From here on we KNOW the audit loaded.
+const audit = auditOrNull;
 
 const scoreInterp = interpretScore(audit.visibility_score);
 const toneColor =

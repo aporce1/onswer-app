@@ -2,17 +2,21 @@
 /**
  * /auth/verify?token=...
  *
- * The user clicked the magic link in their email. We hand the token to
- * the API which validates it and Set-Cookie's the real session JWT.
- * We then redirect them to /dashboard.
+ * The user clicked the magic link in their email. We:
+ *   1. POST the token to api.onswer.app/v1/auth/magic-link/verify
+ *   2. Read the JWT + TTL out of the response body
+ *   3. Set the `onswer_session` cookie HERE, on app.onswer.app, with
+ *      Domain=.onswer.app so it travels to api.* on subsequent fetches.
+ *   4. Redirect to /dashboard
  *
- * SSR-only: this page runs entirely on the server, fetches /v1/auth/magic-link/verify
- * with the token, forwards the Set-Cookie header to the browser, and redirects.
+ * We deliberately do NOT forward the API's Set-Cookie header — Node fetch
+ * + Astro + Vercel make that chain unreliable (cookie sometimes lost mid-
+ * stream). Setting the cookie locally with Astro.cookies.set() is rock-solid
+ * and gives us full control over Domain/Secure/SameSite/MaxAge.
  */
 import AuthLayout from '~/layouts/AuthLayout.astro';
 
 const token = Astro.url.searchParams.get('token') ?? '';
-
 let errorMsg: string | null = null;
 
 if (!token) {
@@ -26,18 +30,37 @@ if (!token) {
       body: JSON.stringify({ token }),
     });
 
-    if (res.ok) {
-      // Forward the Set-Cookie from the API to the browser. The API issued
-      // it with Domain=.onswer.app so it'll travel back to api.onswer.app
-      // on subsequent fetches.
-      const setCookie = res.headers.get('set-cookie');
-      if (setCookie) {
-        Astro.response.headers.append('set-cookie', setCookie);
-      }
+    const body = await res.json().catch(() => null);
+
+    if (res.ok && body?.ok && body?.data?.token) {
+      const jwt: string = body.data.token;
+      const ttl: number = Number(body.data.expires_in_s) || 60 * 60 * 24 * 7;
+
+      // Derive the cookie domain from PUBLIC_SITE_URL so we share with
+      // api.onswer.app in prod and api.onswer.local in dev.
+      // app.onswer.app    → .onswer.app
+      // app.onswer.local  → .onswer.local
+      // localhost:4322    → undefined (host-only cookie, dev-only edge)
+      const siteUrl = import.meta.env.PUBLIC_SITE_URL || 'https://app.onswer.app';
+      const host    = new URL(siteUrl).hostname;
+      const labels  = host.split('.');
+      const cookieDomain =
+        host === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(host)
+          ? undefined
+          : '.' + labels.slice(1).join('.');
+
+      Astro.cookies.set('onswer_session', jwt, {
+        path: '/',
+        domain: cookieDomain,
+        httpOnly: true,
+        secure: siteUrl.startsWith('https://'),
+        sameSite: 'lax',
+        maxAge: ttl,
+      });
+
       return Astro.redirect('/dashboard', 302);
     }
 
-    const body = await res.json().catch(() => null);
     errorMsg = (body && typeof body === 'object' && 'error' in body)
       ? String(body.error)
       : 'Link expired or already used. Sign in again.';

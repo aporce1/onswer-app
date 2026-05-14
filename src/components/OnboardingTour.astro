@@ -1,0 +1,202 @@
+---
+/**
+ * OnboardingTour — Shepherd.js wrapper.
+ *
+ * Lazy-loads Shepherd via ESM CDN and runs a 5-step tour the FIRST time
+ * a user lands on /dashboard (welcome state, before they have any brands).
+ * The tour anchors to elements on the welcome page only — once the user
+ * has brands and gets redirected to /dashboard/brands, we don't replay.
+ *
+ * Re-trigger from /dashboard/settings via "Replay onboarding" button,
+ * which clears the localStorage flag and redirects with ?tour=1.
+ *
+ * Why Shepherd.js: framework-agnostic (works inline with Astro), no
+ * React/Vue dep, ~25KB gzipped, full keyboard nav, ARIA-friendly.
+ */
+
+interface Props {
+  /** First name to greet the user with in step 1. */
+  userFirstName: string;
+  /** If true, ignore the seen-flag and run the tour. Set from ?tour=1. */
+  forceStart?: boolean;
+}
+
+const { userFirstName, forceStart = false } = Astro.props;
+---
+
+<script type="module" define:vars={{ userFirstName, forceStart }}>
+  // localStorage key for the seen-flag. Bump the suffix if we ever ship
+  // a meaningfully different tour and want everyone to see it again.
+  const SEEN_KEY = 'onswer.tour.v1.seen';
+
+  if (forceStart || !localStorage.getItem(SEEN_KEY)) {
+    // Lazy-load Shepherd + its CSS so the dashboard's main bundle stays
+    // light for returning users who'll never see the tour again.
+    Promise.all([
+      import('https://cdn.jsdelivr.net/npm/shepherd.js@14/+esm'),
+      new Promise(resolve => {
+        const link = document.createElement('link');
+        link.rel  = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/shepherd.js@14/dist/css/shepherd.css';
+        link.onload = resolve;
+        link.onerror = resolve;
+        document.head.appendChild(link);
+      }),
+    ]).then(([mod]) => {
+      const Shepherd = mod.default || mod.Shepherd;
+
+      const tour = new Shepherd.Tour({
+        useModalOverlay: true,
+        exitOnEsc: true,
+        keyboardNavigation: true,
+        defaultStepOptions: {
+          classes: 'onswer-shepherd',
+          scrollTo: { behavior: 'smooth', block: 'center' },
+          arrow: true,
+          cancelIcon: { enabled: true, label: 'Skip tour' },
+          modalOverlayOpeningPadding: 6,
+          modalOverlayOpeningRadius: 12,
+        },
+      });
+
+      // Buttons used across steps — Shepherd composes them per-step.
+      const btnBack = {
+        text: 'Back',
+        classes: 'shepherd-button-secondary',
+        action() { return tour.back(); },
+      };
+      const btnNext = label => ({
+        text: label || 'Next',
+        action() { return tour.next(); },
+      });
+      const btnFinish = {
+        text: 'Got it',
+        action() { return tour.complete(); },
+      };
+      const btnSkip = {
+        text: 'Skip',
+        classes: 'shepherd-button-secondary',
+        action() { return tour.cancel(); },
+      };
+
+      tour.addStep({
+        id: 'welcome',
+        title: `Welcome to Onswer, ${userFirstName}`,
+        text: `Quick 4-step tour so you know your way around. Takes less than a minute.`,
+        buttons: [btnSkip, btnNext("Let's go →")],
+      });
+
+      tour.addStep({
+        id: 'sidebar',
+        title: 'This is your home',
+        text: `Brands are the domains you monitor. Each brand has its own audit history, score chart, and recommendations. You'll spend most of your time here.`,
+        attachTo: { element: 'aside', on: 'right' },
+        buttons: [btnBack, btnNext()],
+      });
+
+      tour.addStep({
+        id: 'add-brand',
+        title: 'Start by adding your domain',
+        text: `Type your domain (e.g. <strong>example.com</strong>) and we'll auto-detect your category, competitors, and the buyer queries that matter. The first scan finishes in ~90 seconds on Pro.`,
+        attachTo: { element: 'a[href="/dashboard/brands/new"]', on: 'top' },
+        buttons: [btnBack, btnNext()],
+      });
+
+      tour.addStep({
+        id: 'plan',
+        title: 'Your plan, your cadence',
+        text: `Free lets you save brands and review past audits. Solo and Pro unlock continuous monitoring, more LLMs, more geographies, and the AI Executive Analysis. Upgrade anytime from here.`,
+        attachTo: { element: 'aside .mt-auto', on: 'right' },
+        buttons: [btnBack, btnNext()],
+      });
+
+      tour.addStep({
+        id: 'done',
+        title: "You're set",
+        text: `Add your first brand whenever you're ready. You can replay this tour anytime from <strong>Settings</strong>. Questions? Email us at <a href="mailto:hi@onswer.app" style="color:#6366F1;">hi@onswer.app</a>.`,
+        buttons: [btnBack, btnFinish],
+      });
+
+      // Mark seen on either complete or cancel — once is enough.
+      tour.on('complete', () => localStorage.setItem(SEEN_KEY, '1'));
+      tour.on('cancel',   () => localStorage.setItem(SEEN_KEY, '1'));
+
+      // Give the page one paint before starting so the welcome state has
+      // already rendered (otherwise step 3's anchor isn't in the DOM yet).
+      requestAnimationFrame(() => tour.start());
+    });
+  }
+</script>
+
+<!-- Light-theme override of Shepherd's default dark popovers. Inlined so
+     we don't need a separate stylesheet for a one-off component. -->
+<style is:global>
+  .onswer-shepherd {
+    max-width: 360px;
+  }
+  .onswer-shepherd .shepherd-content {
+    border-radius: 12px;
+    border: 1px solid #E4E4E7;
+    background: #FFFFFF;
+    box-shadow: 0 16px 40px rgba(24, 24, 27, 0.10), 0 8px 16px rgba(24, 24, 27, 0.06);
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    overflow: hidden;
+  }
+  .onswer-shepherd .shepherd-header {
+    background: linear-gradient(135deg, #EEF2FF 0%, #FAF5FF 100%);
+    border-bottom: 1px solid #E4E4E7;
+    padding: 12px 16px;
+  }
+  .onswer-shepherd .shepherd-title {
+    color: #18181B;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .onswer-shepherd .shepherd-cancel-icon {
+    color: #A1A1AA;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .onswer-shepherd .shepherd-cancel-icon:hover { color: #52525B; }
+  .onswer-shepherd .shepherd-text {
+    padding: 14px 16px;
+    color: #52525B;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .onswer-shepherd .shepherd-text strong { color: #18181B; font-weight: 600; }
+  .onswer-shepherd .shepherd-footer {
+    padding: 10px 12px;
+    border-top: 1px solid #F4F4F5;
+    background: #FAFAFA;
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+  }
+  .onswer-shepherd .shepherd-button {
+    background: #6366F1;
+    color: #FFFFFF;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s;
+  }
+  .onswer-shepherd .shepherd-button:hover { background: #4F46E5; }
+  .onswer-shepherd .shepherd-button.shepherd-button-secondary {
+    background: #FFFFFF;
+    color: #52525B;
+    border-color: #D4D4D8;
+  }
+  .onswer-shepherd .shepherd-button.shepherd-button-secondary:hover {
+    background: #F4F4F5;
+  }
+  /* Arrow + overlay */
+  .onswer-shepherd .shepherd-arrow::before { background: #FFFFFF !important; border-color: #E4E4E7 !important; }
+  .shepherd-modal-overlay-container {
+    fill: rgba(24, 24, 27, 0.25);
+  }
+</style>

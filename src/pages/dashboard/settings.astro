@@ -172,6 +172,34 @@ const planInterp = interpretPlan(user.plan);
   </div>
 
   <!-- ============================================================ -->
+  <!-- Help / Tour                                                   -->
+  <!-- ============================================================ -->
+  <div class="card p-6 mb-5">
+    <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Onboarding</h3>
+    <p class="text-xs mt-0.5 mb-4" style="color: var(--color-ink-muted);">
+      Take the guided tour again. Useful if you skipped it the first time or want a refresher.
+    </p>
+
+    <button type="button" class="btn-secondary" id="replay-tour-btn">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M3 21v-5h5M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/>
+      </svg>
+      Replay onboarding
+    </button>
+  </div>
+
+  <script>
+    // The tour stores its seen-flag in localStorage so clearing it +
+    // navigating to /dashboard?tour=1 re-triggers from there. We force
+    // the query param too in case the user already has brands and would
+    // normally get redirected past /dashboard.
+    document.getElementById('replay-tour-btn')?.addEventListener('click', () => {
+      localStorage.removeItem('onswer.tour.v1.seen');
+      window.location.href = '/dashboard?tour=1';
+    });
+  </script>
+
+  <!-- ============================================================ -->
   <!-- Account                                                       -->
   <!-- ============================================================ -->
   <div class="card p-6">

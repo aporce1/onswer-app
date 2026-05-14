@@ -8,6 +8,7 @@
  * like a destination instead of a placeholder.
  */
 import DashboardLayout from '~/layouts/DashboardLayout.astro';
+import OnboardingTour from '~/components/OnboardingTour.astro';
 import { requireSession } from '~/lib/auth';
 import { listBrands } from '~/lib/brands';
 
@@ -22,6 +23,9 @@ if (brands.length > 0) {
 }
 
 const firstName = user.email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+// ?tour=1 forces a replay (from /settings → Replay onboarding).
+const forceTour = Astro.url.searchParams.get('tour') === '1';
 ---
 <DashboardLayout title="Welcome" user={user} active="overview" width="hero">
 
@@ -118,5 +122,10 @@ const firstName = user.email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w
       )}
     </div>
   </div>
+
+  <!-- Guided tour. Only runs the first time the user lands here (or when
+       they click "Replay onboarding" from /settings). Lazy-loads Shepherd
+       so returning users don't pay for the bundle. -->
+  <OnboardingTour userFirstName={firstName} forceStart={forceTour} />
 
 </DashboardLayout>

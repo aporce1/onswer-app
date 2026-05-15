@@ -1,0 +1,202 @@
+---
+/**
+ * /dashboard/brands/[id]/edit — manually correct the brand profile.
+ *
+ * The introspection LLM usually nails it but sometimes misfires (low-content
+ * homepage, niche category, Cloudflare blocking the fetch). This page lets
+ * the user override every field and also re-trigger a fresh introspection
+ * from the live site.
+ *
+ * Domain is intentionally read-only — changing the domain would invalidate
+ * every prior audit's score-over-time chart. Users who want to track a
+ * different domain create a new brand.
+ */
+import DashboardLayout from '~/layouts/DashboardLayout.astro';
+import { requireSession } from '~/lib/auth';
+import { getBrand, updateBrand, reintrospectBrand } from '~/lib/brands';
+
+const sessionOrResponse = await requireSession(Astro);
+if (sessionOrResponse instanceof Response) return sessionOrResponse;
+const user = sessionOrResponse;
+
+const id = Number(Astro.params.id);
+if (!Number.isFinite(id) || id <= 0) return Astro.redirect('/dashboard/brands', 302);
+
+let flash: { tone: 'ok' | 'error', message: string } | null = null;
+
+// Handle form submission (save / reintrospect) BEFORE fetching so the
+// post-save state is what we render.
+if (Astro.request.method === 'POST') {
+  const form = await Astro.request.formData();
+  const action = String(form.get('action') ?? 'save');
+
+  if (action === 'reintrospect') {
+    const r = await reintrospectBrand(Astro, id);
+    flash = r.ok
+      ? { tone: 'ok', message: 'Profile re-detected from your site.' }
+      : { tone: 'error', message: 'error' in r ? r.error : 'Could not re-detect.' };
+  } else {
+    // Parse competitors from textarea — one per line, "Name" or "Name - domain"
+    const compRaw = String(form.get('competitors') ?? '');
+    const competitors = compRaw
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(line => {
+        const [namePart, ...domainParts] = line.split(/\s+[-–—|]\s+/);
+        const name = (namePart ?? '').trim();
+        const domain = domainParts.join(' ').trim();
+        return domain ? { name, domain } : { name };
+      })
+      .filter(c => c.name.length > 0 && c.name.length <= 80)
+      .slice(0, 10);
+
+    const r = await updateBrand(Astro, id, {
+      name:            String(form.get('name') ?? '').trim(),
+      description:     String(form.get('description') ?? '').trim() || null,
+      industry:        String(form.get('industry') ?? '').trim() || null,
+      target_audience: String(form.get('target_audience') ?? '').trim() || null,
+      competitors,
+    });
+    flash = r.ok
+      ? { tone: 'ok', message: 'Brand profile saved.' }
+      : { tone: 'error', message: 'error' in r ? r.error : 'Could not save.' };
+  }
+}
+
+const res = await getBrand(Astro, id);
+if (!res.ok) return Astro.redirect('/dashboard/brands', 302);
+const { brand } = res.data;
+
+// Format competitors back to the textarea layout: one per line
+const competitorsText = (brand.competitors ?? [])
+  .map(c => c.domain ? `${c.name} — ${c.domain}` : c.name)
+  .join('\n');
+---
+<DashboardLayout title={`Edit ${brand.domain}`} user={user} active="brands" width="centered">
+
+  <Fragment slot="header-actions">
+    <a href={`/dashboard/brands/${brand.id}`} class="btn-secondary">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 12H5M12 19l-7-7 7-7"/>
+      </svg>
+      Cancel
+    </a>
+  </Fragment>
+
+  {flash && (
+    <div class="rounded-xl px-4 py-3 mb-5 text-sm"
+         style={flash.tone === 'ok'
+           ? 'background: var(--color-ok-soft); color: var(--color-ok);'
+           : 'background: var(--color-bad-soft); color: var(--color-bad);'}>
+      {flash.message}
+    </div>
+  )}
+
+  <!-- Re-introspect card -->
+  <div class="card p-5 mb-5"
+       style="background: linear-gradient(180deg, var(--color-brand-soft) 0%, var(--color-surface) 30%); border: 1px solid var(--color-brand-line);">
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div class="flex items-start gap-3 min-w-0">
+        <div class="w-8 h-8 rounded-lg shrink-0 inline-flex items-center justify-center"
+             style="background: var(--color-surface); color: var(--color-brand-hover);">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+        </div>
+        <div class="min-w-0">
+          <h3 class="text-sm font-semibold" style="color: var(--color-ink);">Auto-detect from your site</h3>
+          <p class="text-xs mt-0.5 leading-relaxed" style="color: var(--color-ink-muted);">
+            Re-scrape <strong>{brand.domain}</strong> and let Claude re-fill the profile fields below.
+            Useful after a site redesign or if the first detection was off.
+          </p>
+        </div>
+      </div>
+      <form method="POST" class="shrink-0">
+        <input type="hidden" name="action" value="reintrospect" />
+        <button type="submit" class="btn-primary">Re-detect</button>
+      </form>
+    </div>
+  </div>
+
+  <form method="POST" class="card p-7 space-y-6">
+    <input type="hidden" name="action" value="save" />
+
+    <div>
+      <label class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">Domain</label>
+      <input type="text" disabled class="input" value={brand.domain}
+             style="opacity: 0.6; cursor: not-allowed;" />
+      <p class="text-[11px] mt-1" style="color: var(--color-ink-subtle);">
+        Domain is fixed — to track a different one, create a new brand.
+      </p>
+    </div>
+
+    <div>
+      <label for="name" class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">
+        Display name
+      </label>
+      <input id="name" name="name" type="text" required class="input"
+             value={brand.name} maxlength="120" />
+      <p class="text-[11px] mt-1" style="color: var(--color-ink-subtle);">
+        The brand name as it should appear in queries. Make it unique — generic words
+        ("Radar", "Pulse") get false-positive mentions; "Radar SysWP" is better.
+      </p>
+    </div>
+
+    <div>
+      <label for="industry" class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">
+        Industry / category
+      </label>
+      <input id="industry" name="industry" type="text" class="input"
+             value={brand.industry ?? ''} maxlength="120"
+             placeholder="e.g. server-side analytics for WordPress" />
+      <p class="text-[11px] mt-1" style="color: var(--color-ink-subtle);">
+        Specific is better than generic. "WordPress security plugin" beats "software".
+      </p>
+    </div>
+
+    <div>
+      <label for="description" class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">
+        Description
+      </label>
+      <textarea id="description" name="description" rows="3" class="input"
+                style="resize: vertical; min-height: 80px; font-family: inherit;"
+                maxlength="280"
+                placeholder="One sentence about what your brand does.">{brand.description ?? ''}</textarea>
+    </div>
+
+    <div>
+      <label for="target_audience" class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">
+        Target audience
+      </label>
+      <input id="target_audience" name="target_audience" type="text" class="input"
+             value={brand.target_audience ?? ''} maxlength="120"
+             placeholder="e.g. small WordPress site owners in Brazil" />
+    </div>
+
+    <div>
+      <label for="competitors" class="block text-xs font-medium mb-1.5" style="color: var(--color-ink);">
+        Competitors
+      </label>
+      <textarea id="competitors" name="competitors" rows="5" class="input"
+                style="resize: vertical; min-height: 120px; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.8125rem;"
+                placeholder={`One per line. Format: Name — domain (optional)\n\nNotion — notion.so\nLinear — linear.app\nGitHub Issues`}>{competitorsText}</textarea>
+      <p class="text-[11px] mt-1" style="color: var(--color-ink-subtle);">
+        Up to 10 brands. We use these as anchors when tracking how often LLMs
+        recommend them vs. you in the same category.
+      </p>
+    </div>
+
+    <div class="flex items-center justify-between flex-wrap gap-3 pt-2 border-t"
+         style="border-color: var(--color-border);">
+      <a href={`/dashboard/brands/${brand.id}`} class="btn-secondary">Cancel</a>
+      <button type="submit" class="btn-primary">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 13l4 4L19 7"/>
+        </svg>
+        Save changes
+      </button>
+    </div>
+  </form>
+
+</DashboardLayout>

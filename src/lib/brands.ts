@@ -41,6 +41,8 @@ export interface BrandDetail {
   domain: string;
   description: string | null;
   industry: string | null;
+  target_audience: string | null;
+  competitors: Array<{ name: string; domain?: string }>;
   status: string;
   scan_frequency: ScanFrequency;
   next_scan_at: string | null;
@@ -109,6 +111,31 @@ export async function updateBrandSchedule(
 export async function deleteBrand(context: APIContext, id: number) {
   return api<{ deleted: boolean }>(`/v1/brands/${id}`, {
     method: 'DELETE',
+    cookie: ctxCookie(context),
+  });
+}
+
+export async function updateBrand(
+  context: APIContext,
+  id: number,
+  payload: {
+    name?: string;
+    description?: string | null;
+    industry?: string | null;
+    target_audience?: string | null;
+    competitors?: Array<{ name: string; domain?: string }>;
+  }
+) {
+  return api<{ brand: BrandDetail }>(`/v1/brands/${id}`, {
+    method: 'PUT',
+    cookie: ctxCookie(context),
+    body: payload,
+  });
+}
+
+export async function reintrospectBrand(context: APIContext, id: number) {
+  return api<{ brand: BrandDetail }>(`/v1/brands/${id}/reintrospect`, {
+    method: 'POST',
     cookie: ctxCookie(context),
   });
 }

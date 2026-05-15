@@ -42,6 +42,8 @@ const containerClasses =
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://rsms.me/" />
   <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+  {/* Per-page extras: meta-refresh during long-running audits, etc. */}
+  <slot name="head-extra" />
 </head>
 <body class="min-h-screen">
 
